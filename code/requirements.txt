@@ -1,0 +1,12 @@
+torch
+torchcde
+addict
+modelscope
+ms-swift
+transformers
+sentencepiece
+protobuf==3.20.*
+nni
+numpy 
+pandas
+matplotlib

@@ -1,0 +1,10 @@
+.venv 
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+
+code/wandb/
+code/wandb
+.tmp.*
