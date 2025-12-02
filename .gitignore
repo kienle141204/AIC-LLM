@@ -8,3 +8,5 @@ __pycache__/
 code/wandb/
 code/wandb
 .tmp.*
+
+code/logs/*

@@ -202,6 +202,15 @@ class AICLLM(nn.Module):
             tim_dim=tim_dim, 
             drop_out=dropout
         )
+
+        self.time_anchor_tokenizer = Time2Token(
+            sample_len=sample_len, 
+            features=input_dim, 
+            emb_dim=self.emb_dim, 
+            tim_dim=tim_dim, 
+            drop_out=dropout
+        )
+
         self.node_tokenizer = Node2Token(
             sample_len=sample_len, 
             features=input_dim, 
@@ -234,7 +243,7 @@ class AICLLM(nn.Module):
 
         self.layer_norm = nn.LayerNorm(self.emb_dim)
     
-    def forward(self, x: torch.FloatTensor, timestamp: torch.Tensor, prompt_prefix: Optional[torch.Tensor]):
+    def forward(self, x: torch.FloatTensor, xa: torch.FloatTensor, timestamp: torch.Tensor, prompt_prefix: Optional[torch.Tensor]):
         B, N, TF = x.shape
         other_loss = []
 
@@ -265,6 +274,9 @@ class AICLLM(nn.Module):
         time_tokens = self.time_tokenizer(x, te)
         time_tokens_idx = st_embedding.shape[1]
         st_embedding = torch.concat((time_tokens, st_embedding), dim=1)  
+
+        ta_tokens = self.time_anchor_tokenizer(xa, te)
+        st_embedding = torch.concat((ta_tokens, st_embedding), dim=1)
 
         if prompt_prefix is not None:
             prompt_len,_ = prompt_prefix.shape

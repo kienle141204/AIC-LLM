@@ -2,17 +2,17 @@ import torch
 import numpy as np
 import torch.utils.data
 from typing import Dict
-from data.data_provider import PEMSFLOWProvider,PEMSMISSINGProvider,NYCTAXIProvider
+from data.data_provider import PEMSFLOWProvider,NYCTAXIProvider
 
 data_dict = {
     'PEMS08FLOW': PEMSFLOWProvider,
     'PEMS04FLOW': PEMSFLOWProvider,
     'PEMS03FLOW': PEMSFLOWProvider,
     'PEMS07FLOW': PEMSFLOWProvider,
-    'PEMS08MISSING': PEMSMISSINGProvider,
-    'PEMS04MISSING': PEMSMISSINGProvider,
-    'PEMS03MISSING': PEMSMISSINGProvider,
-    'PEMS07MISSING': PEMSMISSINGProvider,
+    # 'PEMS08MISSING': PEMSMISSINGProvider,
+    # 'PEMS04MISSING': PEMSMISSINGProvider,
+    # 'PEMS03MISSING': PEMSMISSINGProvider,
+    # 'PEMS07MISSING': PEMSMISSINGProvider,
     'NYCTAXI':NYCTAXIProvider,
     'CHITAXI':NYCTAXIProvider,
 }
@@ -31,7 +31,7 @@ def load_data(dataset,batch_size, sample_len,output_len, window_size, \
 
     train_set, val_set, test_set = dataprovider.getdataset(sample_len=sample_len,output_len=output_len,window_size=window_size, \
                                                            input_dim = input_dim , output_dim = output_dim,
-                                                           train_ratio=train_ratio,val_ratio=val_ratio,target_strategy=target_strategy, few_shot = few_shot)
+                                                           train_ratio=train_ratio,val_ratio=val_ratio, few_shot = few_shot)
 
     train_loader = data_loader(train_set, batch_size=batch_size)
 
