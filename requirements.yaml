@@ -1,0 +1,19 @@
+name: stllm_test
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - numpy
+  - pandas
+  - matplotlib
+  - torchcde
+  - protobuf=3.20.*
+  - nni
+  - sentencepiece
+  - transformers
+  - pip
+  - pip:
+    - addict
+    - modelscope
+    - ms-swift
