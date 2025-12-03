@@ -177,6 +177,7 @@ class AICLLM(nn.Module):
                  use_node_embedding: bool = True,
                  use_time_token: bool = True,
                  use_sandglassAttn: bool = True,
+                 use_diff: int=1,
                  t_dim: int = 64, trunc_k=16, wo_conloss=False) :
         super(AICLLM, self).__init__()
 
@@ -188,6 +189,7 @@ class AICLLM(nn.Module):
         self.use_node_embedding = use_node_embedding
         self.use_time_token = use_time_token
         self.sag_tokens = sag_tokens
+        self.use_diff = use_diff
 
         self.topological_sort_node = True
 
@@ -246,6 +248,8 @@ class AICLLM(nn.Module):
     def forward(self, x: torch.FloatTensor, xa: torch.FloatTensor, timestamp: torch.Tensor, prompt_prefix: Optional[torch.Tensor]):
         B, N, TF = x.shape
         other_loss = []
+        if self.use_diff:
+            xa = x - xa
 
         timestamp = timestamp[:, :self.sample_len, :]
         te = self.time_embedding(timestamp) 

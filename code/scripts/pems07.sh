@@ -1,7 +1,7 @@
 
 python main.py \
-    --data_path '../../../data/traffic/PEMS07/PEMS07.npz' \
-    --adj_filename ../../../data/traffic/PEMS07/PEMS07.csv \
+    --data_path '../../data/traffic/PEMS07/PEMS07.npz' \
+    --adj_filename ../../data/traffic/PEMS07/PEMS07.csv \
     --dataset PEMS07FLOW \
     --desc PEMS07_pre\
     --sample_len 12 \
