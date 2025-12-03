@@ -6,7 +6,7 @@
 #SBATCH --partition=defq
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
-#SBATCH --nodelist=dgx01,dgx02
+#SBATCH --nodelist=dgx02
 ##SBATCH --time=14-00:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
