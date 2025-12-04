@@ -24,12 +24,14 @@ class BasicDataset(torch.utils.data.Dataset):
     history: torch.Tensor        # (B, sample_len, node_num, features)
     history_avg: torch.Tensor    # (B, sample_len, node_num, features) - weekly average
     target: torch.Tensor         # (B, output_len, node_num, output_dim)
+    target_avg: torch.Tensor     # (B, output_len, node_num, output_dim) - weekly average for target
     timestamp: torch.Tensor      # (B, window_size, 5)
 
-    def __init__(self, history, history_avg, target, timestamp, training=False) -> None:
+    def __init__(self, history, history_avg, target, target_avg, timestamp, training=False) -> None:
         self.history = history
         self.history_avg = history_avg
         self.target = target
+        self.target_avg = target_avg
         self.timestamp = timestamp
         self.training = training
 
@@ -38,7 +40,7 @@ class BasicDataset(torch.utils.data.Dataset):
     
     def __getitem__(self, index):
         return (self.history[index], self.history_avg[index], 
-                self.target[index], self.timestamp[index])
+                self.target[index], self.target_avg[index], self.timestamp[index])
 
 
 class DataProvider():
@@ -150,13 +152,15 @@ class DataProvider():
         train_x = train_sample[:, :sample_len, ..., :input_dim]
         train_x_avg = train_sample_avg[:, :sample_len, ..., :input_dim]
         train_y = train_sample[:, -output_len:, ..., :output_dim]
+        train_y_avg = train_sample_avg[:, -output_len:, ..., :output_dim]
         
         train_x = self.scaler.transform(train_x)
         train_x_avg = self.scaler.transform(train_x_avg)
+        train_y_avg = self.scaler.transform(train_y_avg)
         
         train_te = generate_sample_by_sliding_window(train_te, sample_len=window_size)
         train_dataset = BasicDataset(history=train_x, history_avg=train_x_avg, 
-                                    target=train_y, timestamp=train_te, training=True)
+                                    target=train_y, target_avg=train_y_avg, timestamp=train_te, training=True)
 
         # Validation set
         val_data_normal = self.data[val_range[0]:val_range[1]]
@@ -169,13 +173,15 @@ class DataProvider():
         val_x = val_sample[:, :sample_len, ..., :input_dim]
         val_x_avg = val_sample_avg[:, :sample_len, ..., :input_dim]
         val_y = val_sample[:, -output_len:, ..., :output_dim]
+        val_y_avg = val_sample_avg[:, -output_len:, ..., :output_dim]
         
         val_x = self.scaler.transform(val_x)
         val_x_avg = self.scaler.transform(val_x_avg)
+        val_y_avg = self.scaler.transform(val_y_avg)
         
         val_te = generate_sample_by_sliding_window(val_te, sample_len=window_size)
         val_dataset = BasicDataset(history=val_x, history_avg=val_x_avg, 
-                                   target=val_y, timestamp=val_te)
+                                   target=val_y, target_avg=val_y_avg, timestamp=val_te)
 
         # Test set
         test_data_normal = self.data[test_range[0]:test_range[1]]
@@ -188,13 +194,15 @@ class DataProvider():
         test_x = test_sample[:, :sample_len, ..., :input_dim]
         test_x_avg = test_sample_avg[:, :sample_len, ..., :input_dim]
         test_y = test_sample[:, -output_len:, ..., :output_dim]
+        test_y_avg = test_sample_avg[:, -output_len:, ..., :output_dim]
         
         test_x = self.scaler.transform(test_x)
         test_x_avg = self.scaler.transform(test_x_avg)
+        test_y_avg = self.scaler.transform(test_y_avg)
         
         test_te = generate_sample_by_sliding_window(test_te, sample_len=window_size)
         test_dataset = BasicDataset(history=test_x, history_avg=test_x_avg, 
-                                    target=test_y, timestamp=test_te)
+                                    target=test_y, target_avg=test_y_avg, timestamp=test_te)
 
         return train_dataset, val_dataset, test_dataset
 

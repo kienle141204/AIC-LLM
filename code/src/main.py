@@ -32,13 +32,15 @@ def TrainEpoch(loader, model, optim, loss_fn, prompt_prefix, scaler, need_step: 
     loss_item = 0
     count = 0
 
-    for input, input_anchor, target, timestamp in loader:  
+    for input, input_anchor, target, target_anchor, timestamp in loader:  
         # (B,T,N,F)
         B, T, N, F = input.shape
         input = input.permute(0,2,1,3).contiguous().view(B,N,-1)
         input_anchor = input_anchor.permute(0,2,1,3).contiguous().view(B,N,-1)
 
         predict, other_loss = model(input, input_anchor, timestamp, prompt_prefix)
+
+        predict += target_anchor
 
         predict = predict.view(B, N, -1, args.output_dim).permute(0, 2, 1, 3).contiguous()  #(B, T, N, F)
         predict = scaler.inverse_transform(predict)
@@ -72,13 +74,14 @@ def TestEpoch(loader, model, prompt_prefix, scaler, save=False):
         targets = []
         predicts = []
 
-        for input, input_anchor, target, timestamp in loader:
+        for input, input_anchor, target, target_anchor, timestamp in loader:
             B, T, N, F = input.shape
 
             input = input.permute(0,2,1,3).contiguous().view(B,N,-1)
             input_anchor = input_anchor.permute(0,2,1,3).contiguous().view(B,N,-1)
 
             predict, _ = model(input, input_anchor, timestamp, prompt_prefix)
+            predict += target_anchor
 
             predict = predict.view(B, N, -1, args.output_dim).permute(0, 2, 1, 3).contiguous()
 
@@ -197,7 +200,7 @@ def getllm(args):
 if __name__ == '__main__':
     
     args = InitArgs()
-    wandb.init(project="AIC-LLM", name=f"{args.desc}_{datetime.now().strftime("%Y-%m-%d %H:%M")}", config=vars(args))
+    wandb.init(project="AIC-LLM", name=f"{args.desc}_{datetime.now().strftime('%Y-%m-%d %H:%M')}", config=vars(args))
 
     output_len = args.predict_len
     window_size = args.sample_len + args.predict_len

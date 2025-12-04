@@ -249,7 +249,7 @@ class AICLLM(nn.Module):
         B, N, TF = x.shape
         other_loss = []
         if self.use_diff:
-            xa = x - xa
+            x = x - xa
 
         timestamp = timestamp[:, :self.sample_len, :]
         te = self.time_embedding(timestamp) 
@@ -279,8 +279,8 @@ class AICLLM(nn.Module):
         time_tokens_idx = st_embedding.shape[1]
         st_embedding = torch.concat((time_tokens, st_embedding), dim=1)  
 
-        ta_tokens = self.time_anchor_tokenizer(xa, te)
-        st_embedding = torch.concat((ta_tokens, st_embedding), dim=1)
+        # ta_tokens = self.time_anchor_tokenizer(xa, te)
+        # st_embedding = torch.concat((ta_tokens, st_embedding), dim=1)
 
         if prompt_prefix is not None:
             prompt_len,_ = prompt_prefix.shape
