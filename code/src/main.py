@@ -41,7 +41,7 @@ def TrainEpoch(loader, model, optim, loss_fn, prompt_prefix, scaler, need_step: 
         predict, other_loss = model(input, input_anchor, timestamp, prompt_prefix)
 
         predict = predict.view(B, N, -1, args.output_dim).permute(0, 2, 1, 3).contiguous()  #(B, T, N, F)
-        predict += target_anchor
+        # predict += target_anchor
         predict = scaler.inverse_transform(predict)
 
         loss = loss_fn(predict, target)
@@ -81,7 +81,7 @@ def TestEpoch(loader, model, prompt_prefix, scaler, save=False):
 
             predict, _ = model(input, input_anchor, timestamp, prompt_prefix)
             predict = predict.view(B, N, -1, args.output_dim).permute(0, 2, 1, 3).contiguous()
-            predict += target_anchor
+            # predict += target_anchor
 
             targets.append(target.detach())
             predicts.append(predict.detach())
@@ -254,6 +254,7 @@ if __name__ == '__main__':
                     sag_dim = args.sag_dim, sag_tokens = args.sag_tokens, \
                      adj_mx = adj_mx, dis_mx = distance_mx, \
                     use_node_embedding = args.node_embedding ,use_time_token= args.time_token, \
+                    use_anchor = args.use_anchor, \
                     use_sandglassAttn = args.sandglassAttn, dropout = args.dropout, trunc_k = args.trunc_k, t_dim = args.t_dim,wo_conloss=args.wo_conloss).cuda()
     
     if not args.from_pretrained_model is None:

@@ -4,6 +4,8 @@ import numpy as np
 from utils.utils import lap_eig, topological_sort
 from typing import Optional
 from model.sandglassAttn import SAG
+from spatial_tokenizer import NodeEmbedding, Node2Token
+from temporal_tokenizer import TimeEmbedding, Time2Token, AT2Token
 
 class DecodingLayer(nn.Module):
     def __init__(self, input_dim, emb_dim, output_dim):
@@ -20,200 +22,6 @@ class DecodingLayer(nn.Module):
         out = self.fc(x)
         return out
     
-class TimeEmbedding(nn.Module):
-    def __init__(self, t_dim):
-        super(TimeEmbedding, self).__init__()
-        self.day_embedding = nn.Embedding(num_embeddings=288, embedding_dim=t_dim)
-        self.week_embedding = nn.Embedding(num_embeddings=7, embedding_dim=t_dim)
-    
-    def forward(self, TE):
-        B, T, _ = TE.shape
-
-        week = (TE[..., 2].to(torch.long) % 7).view(B * T, -1)
-        hour = (TE[..., 3].to(torch.long) % 24).view(B * T, -1)
-        minute = (TE[..., 4].to(torch.long) % 60).view(B * T, -1)
-
-        WE = self.week_embedding(week).view(B, T, -1)
-        DE = self.day_embedding((hour*60 + minute)//5).view(B, T, -1)
-
-        TE = torch.cat([WE, DE], dim=-1).view(B, T, -1)
-        return TE
-    
-
-class NodeEmbedding(nn.Module):
-    def __init__(self, adj_mx, node_emb_dim, k=16, dropout=0):
-        super(NodeEmbedding, self).__init__()
-        N, _ = adj_mx.shape
-        self.k = k
-        self.set_adj(adj_mx)
-        self.fc = nn.Linear(in_features=k, out_features=node_emb_dim)
-
-    def forward(self):
-        node_embedding = self.fc(self.lap_eigvec)
-
-        return node_embedding
-    
-    def set_adj(self, adj_mx):
-        N, _ = adj_mx.shape
-        
-        self.adj_mx = adj_mx
-        eig_vec, eig_val = lap_eig(adj_mx)
-
-        k = self.k
-        if k > N:
-            eig_vec = np.concatenate([eig_vec, np.zeros((N, k - N))], dim=-1)
-            eig_val = np.concatenate([eig_val, np.zeros(k - N)], dim=-1)
-        
-        ind = np.abs(eig_val).argsort(axis=0)[::-1][:k]
-
-        eig_vec = eig_vec[:, ind]
-
-        if hasattr(self, 'lap_eigvec'):
-            self.lap_eigvec = torch.tensor(eig_vec).float()
-        else:
-            self.register_buffer('lap_eigvec', torch.tensor(eig_vec).float())
-
-class Time2Token(nn.Module):
-    def __init__(self, sample_len, features, emb_dim, tim_dim, drop_out):
-        super(Time2Token, self).__init__()
-        self.sample_len = sample_len
-        self.features = features
-        self.emb_dim = emb_dim
-
-        in_features = sample_len * features + tim_dim
-        hidden_size = (in_features + emb_dim)*2//3
-
-        self.fc_state = nn.Sequential(
-            nn.Linear(in_features=in_features, out_features=hidden_size),
-            nn.ReLU(),
-            nn.Linear(hidden_size, emb_dim),
-        )
-
-        input_dim = tim_dim + features * (sample_len-1)
-        hidden_size = (input_dim + emb_dim)*2//3
-        self.fc_grad = nn.Sequential(
-            nn.Linear(in_features=input_dim, out_features=hidden_size),
-            nn.ReLU(),
-            nn.Linear(hidden_size, emb_dim),
-        )
-
-        self.ln = nn.LayerNorm(emb_dim)
-
-    def forward(self, x, te, mask=None):
-        B, N, TF = x.shape
-
-        x = x.view(B, N, self.sample_len, -1)   #(B,N,T,F)
-        x = x.mean(dim=1)   #(B,T,F)
-
-        state = x.view(B,1,-1)
-        state = torch.concat((state,te[:,-1:,:]),dim=-1)    #(B,1,TF+tim_dim)
-        state = self.fc_state(state)
-
-        grad = (x[:,1:,:] - x[:,:-1,:]).view(B,1,-1)    #(B,1,(T-1)F)
-        grad = torch.concat((grad,te[:,-1:,:]),dim=-1)    #(B,1,(T-1)F+tim_dim)
-        grad = self.fc_grad(grad)
-
-        out = torch.concat((state,grad),dim=1)
-
-        out = self.ln(out)
-
-        return out
-    
-class AT2Token(nn.Module):
-    def __init__(self, sample_len, features, emb_dim, tim_dim, drop_out):
-        super(AT2Token, self).__init__()
-        self.sample_len = sample_len
-        self.features = features
-        self.emb_dim = emb_dim
-        self.tim_dim = tim_dim
-        self.drop_out = drop_out
-
-        in_features = sample_len * features + tim_dim
-        hidden_size = (in_features + emb_dim)*2//3
-        
-        self.fc1 = nn.Sequential(
-            nn.Linear(in_features=in_features, out_features=hidden_size),
-            nn.ReLU(),
-            nn.Linear(hidden_size, emb_dim),
-        )
-        self.fc2 = nn.Sequential(
-            nn.Linear(in_features=in_features, out_features=hidden_size),
-            nn.ReLU(),
-            nn.Linear(hidden_size, emb_dim),
-        )
-
-        self.ln = nn.LayerNorm(emb_dim)    
-    def forward(self, x1, x2, te, mask=None):
-        B, N, TF = x1.shape
-
-        x1 = x1.view(B, N, self.sample_len, -1)   #(B,N,T,F)
-        x1 = x1.mean(dim=1)   #(B,T,F)
-
-        x2 = x2.view(B, N, self.sample_len, -1)   #(B,N,T,F)
-        x2 = x2.mean(dim=1)   #(B,T,F)
-
-        x1 = x1.view(B,1,-1)
-        x2 = x2.view(B,1,-1)
-
-        x1 = torch.concat((x1,te[:,-1:,:]),dim=-1)    #(B,1,TF+tim_dim)
-        x1 = self.fc1(x1)
-
-        x2 = torch.concat((x2,te[:,-1:,:]),dim=-1)    #(B,1,TF+tim_dim)
-        x2 = self.fc2(x2)
-
-        out = torch.concat((x1,x2),dim=1)
-
-        out = self.ln(out)
-
-        return out
-    
-
-class Node2Token(nn.Module):
-    def __init__(self, sample_len, features, node_emb_dim, emb_dim, tim_dim, dropout, use_node_embedding):
-        super().__init__()
-
-        in_features = sample_len * features
-
-        self.use_node_embedding = use_node_embedding
-
-        state_features = tim_dim
-        if use_node_embedding:
-            state_features += node_emb_dim
-
-        # Node feature embedding
-        self.fc1 = nn.Sequential(
-            nn.Linear(in_features, emb_dim),
-        )
-
-        # State embedding (time + node_emb)
-        hidden_size = node_emb_dim
-        self.state_fc = nn.Sequential(
-            nn.Linear(state_features, hidden_size),
-            nn.ReLU(),
-            nn.Linear(hidden_size, emb_dim),
-        )
-
-        self.ln = nn.LayerNorm(emb_dim)
-
-    def forward(self, x, te, ne):
-        # x: (B, N, T*F)   te: (B, T, tim_dim)   ne: (N, node_emb_dim)
-        B, N, TF = x.shape
-
-        x = self.fc1(x) 
-
-        state = te[:, -1:, :].repeat(1, N, 1)
-
-        if self.use_node_embedding:
-            ne = ne.unsqueeze(0).repeat(B, 1, 1)
-            state = torch.concat((state, ne), dim=-1)
-
-        state = self.state_fc(state)
-
-        # Combine
-        out = x + state
-        out = self.ln(out)
-
-        return out
     
 
 class AICLLM(nn.Module):
@@ -225,6 +33,7 @@ class AICLLM(nn.Module):
                  use_node_embedding: bool = True,
                  use_time_token: bool = True,
                  use_sandglassAttn: bool = True,
+                 use_anchor: int=0,
                  use_diff: int=1,
                  t_dim: int = 64, trunc_k=16, wo_conloss=False) :
         super(AICLLM, self).__init__()
@@ -238,6 +47,7 @@ class AICLLM(nn.Module):
         self.use_time_token = use_time_token
         self.sag_tokens = sag_tokens
         self.use_diff = use_diff
+        self.use_anchor = use_anchor
 
         self.topological_sort_node = True
 
@@ -253,13 +63,13 @@ class AICLLM(nn.Module):
             drop_out=dropout
         )
 
-        self.time_anchor_tokenizer = Time2Token(
-            sample_len=sample_len, 
-            features=input_dim, 
-            emb_dim=self.emb_dim, 
-            tim_dim=tim_dim, 
-            drop_out=dropout
-        )
+        # self.time_anchor_tokenizer = Time2Token(
+        #     sample_len=sample_len, 
+        #     features=input_dim, 
+        #     emb_dim=self.emb_dim, 
+        #     tim_dim=tim_dim, 
+        #     drop_out=dropout
+        # )
 
         self.node_tokenizer = Node2Token(
             sample_len=sample_len, 
@@ -336,9 +146,10 @@ class AICLLM(nn.Module):
         time_tokens_idx = st_embedding.shape[1]
         st_embedding = torch.concat((time_tokens, st_embedding), dim=1)  
 
-        at_tokens = self.at_tokenizer(x_diff, xa, te)
-        at_tokens_idx = st_embedding.shape[1]
-        st_embedding = torch.concat((at_tokens, st_embedding), dim=1)   
+        if self.use_anchor == 1:
+            at_tokens = self.at_tokenizer(x_diff, xa, te)
+            at_tokens_idx = st_embedding.shape[1]
+            st_embedding = torch.concat((at_tokens, st_embedding), dim=1)   
 
         # ta_tokens = self.time_anchor_tokenizer(xa, te)
         # st_embedding = torch.concat((ta_tokens, st_embedding), dim=1)
