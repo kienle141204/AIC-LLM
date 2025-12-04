@@ -119,6 +119,54 @@ class Time2Token(nn.Module):
 
         return out
     
+class AT2Token(nn.Module):
+    def __init__(self, sample_len, features, emb_dim, tim_dim, drop_out):
+        super(AT2Token, self).__init__()
+        self.sample_len = sample_len
+        self.features = features
+        self.emb_dim = emb_dim
+        self.tim_dim = tim_dim
+        self.drop_out = drop_out
+
+        in_features = sample_len * features + tim_dim
+        hidden_size = (in_features + emb_dim)*2//3
+        
+        self.fc1 = nn.Sequential(
+            nn.Linear(in_features=in_features, out_features=hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, emb_dim),
+        )
+        self.fc2 = nn.Sequential(
+            nn.Linear(in_features=in_features, out_features=hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, emb_dim),
+        )
+
+        self.ln = nn.LayerNorm(emb_dim)    
+    def forward(self, x1, x2, te, mask=None):
+        B, N, TF = x1.shape
+
+        x1 = x1.view(B, N, self.sample_len, -1)   #(B,N,T,F)
+        x1 = x1.mean(dim=1)   #(B,T,F)
+
+        x2 = x2.view(B, N, self.sample_len, -1)   #(B,N,T,F)
+        x2 = x2.mean(dim=1)   #(B,T,F)
+
+        x1 = x1.view(B,1,-1)
+        x2 = x2.view(B,1,-1)
+
+        x1 = torch.concat((x1,te[:,-1:,:]),dim=-1)    #(B,1,TF+tim_dim)
+        x1 = self.fc1(x1)
+
+        x2 = torch.concat((x2,te[:,-1:,:]),dim=-1)    #(B,1,TF+tim_dim)
+        x2 = self.fc2(x2)
+
+        out = torch.concat((x1,x2),dim=1)
+
+        out = self.ln(out)
+
+        return out
+    
 
 class Node2Token(nn.Module):
     def __init__(self, sample_len, features, node_emb_dim, emb_dim, tim_dim, dropout, use_node_embedding):
@@ -223,6 +271,14 @@ class AICLLM(nn.Module):
             use_node_embedding=use_node_embedding
         )
 
+        self.at_tokenizer = AT2Token(
+            sample_len=sample_len, 
+            features=input_dim, 
+            emb_dim=self.emb_dim, 
+            tim_dim=tim_dim, 
+            drop_out=dropout
+        )
+
         self.node_embedding = NodeEmbedding(adj_mx=adj_mx, node_emb_dim=node_emb_dim, k=trunc_k, dropout=dropout)
         self.time_embedding = TimeEmbedding(t_dim=t_dim)
 
@@ -248,8 +304,9 @@ class AICLLM(nn.Module):
     def forward(self, x: torch.FloatTensor, xa: torch.FloatTensor, timestamp: torch.Tensor, prompt_prefix: Optional[torch.Tensor]):
         B, N, TF = x.shape
         other_loss = []
-        if self.use_diff:
-            x = x - xa
+        # if self.use_diff:
+        #     x = x - xa
+        x_diff = x - xa
 
         timestamp = timestamp[:, :self.sample_len, :]
         te = self.time_embedding(timestamp) 
@@ -278,6 +335,10 @@ class AICLLM(nn.Module):
         time_tokens = self.time_tokenizer(x, te)
         time_tokens_idx = st_embedding.shape[1]
         st_embedding = torch.concat((time_tokens, st_embedding), dim=1)  
+
+        at_tokens = self.at_tokenizer(x_diff, xa, te)
+        at_tokens_idx = st_embedding.shape[1]
+        st_embedding = torch.concat((at_tokens, st_embedding), dim=1)   
 
         # ta_tokens = self.time_anchor_tokenizer(xa, te)
         # st_embedding = torch.concat((ta_tokens, st_embedding), dim=1)
