@@ -197,7 +197,7 @@ def getllm(args):
 if __name__ == '__main__':
     
     args = InitArgs()
-    wandb.init(project="AIC-LLM", name=f"{args.desc}_{datetime.now().strftime("%Y-%m-%d %H:%M")}", config=vars(args))
+    wandb.init(project="AIC-LLM", name=f"{args.desc}_{datetime.now().strftime('%Y-%m-%d %H:%M')}", config=vars(args))
 
     output_len = args.predict_len
     window_size = args.sample_len + args.predict_len
@@ -253,6 +253,7 @@ if __name__ == '__main__':
                     sag_dim = args.sag_dim, sag_tokens = args.sag_tokens, \
                      adj_mx = adj_mx, dis_mx = distance_mx, \
                     use_node_embedding = args.node_embedding ,use_time_token= args.time_token, \
+                    use_anchor = args.use_anchor,\
                     use_sandglassAttn = args.sandglassAttn, dropout = args.dropout, trunc_k = args.trunc_k, t_dim = args.t_dim,wo_conloss=args.wo_conloss).cuda()
     
     if not args.from_pretrained_model is None:

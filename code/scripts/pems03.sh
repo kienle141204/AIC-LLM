@@ -1,4 +1,3 @@
-
 python main.py \
     --data_path '../../data/traffic/PEMS03/PEMS03.npz' \
     --adj_filename ../../data/traffic/PEMS03/PEMS03.csv \
@@ -31,5 +30,4 @@ python main.py \
     --sag_dim 128 \
     --sag_tokens 128 \
     --input_dim 1\
-    --output_dim 1 \
-    --prompt_prefix "Dataset: PEMS03 (California District 3 Traffic Flow). Characteristics: Real-world traffic data from 358 sensors aggregated every 5 minutes. Task: Spatio-temporal forecasting. Capture the spatial dependencies between road sensors and temporal traffic patterns to predict the next hour of traffic flow."
+    --output_dim 1

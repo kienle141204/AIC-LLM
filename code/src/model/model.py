@@ -74,50 +74,46 @@ class NodeEmbedding(nn.Module):
             self.register_buffer('lap_eigvec', torch.tensor(eig_vec).float())
 
 class Time2Token(nn.Module):
-    def __init__(self, sample_len, features, emb_dim, tim_dim, drop_out):
+    def __init__(self, sample_len, features, emb_dim, tim_dim, num_tokens=3, drop_out=0.1):
         super(Time2Token, self).__init__()
         self.sample_len = sample_len
         self.features = features
-        self.emb_dim = emb_dim
+        
+        # Cfeatures: trend, seasonality, residual
+        self.trend_conv = nn.Conv1d(features, emb_dim, kernel_size=5, padding=2)
 
-        in_features = sample_len * features + tim_dim
-        hidden_size = (in_features + emb_dim)*2//3
+        self.season_conv = nn.Conv1d(features, emb_dim, kernel_size=2, padding=1)
 
-        self.fc_state = nn.Sequential(
-            nn.Linear(in_features=in_features, out_features=hidden_size),
-            nn.ReLU(),
-            nn.Linear(hidden_size, emb_dim),
-        )
-
-        input_dim = tim_dim + features * (sample_len-1)
-        hidden_size = (input_dim + emb_dim)*2//3
-        self.fc_grad = nn.Sequential(
-            nn.Linear(in_features=input_dim, out_features=hidden_size),
-            nn.ReLU(),
-            nn.Linear(hidden_size, emb_dim),
-        )
-
+        self.residual_fc = nn.Linear(sample_len * features + tim_dim, emb_dim)
+        
         self.ln = nn.LayerNorm(emb_dim)
-
+        self.dropout = nn.Dropout(drop_out)
+        
     def forward(self, x, te, mask=None):
         B, N, TF = x.shape
-
-        x = x.view(B, N, self.sample_len, -1)   #(B,N,T,F)
-        x = x.mean(dim=1)   #(B,T,F)
-
-        state = x.view(B,1,-1)
-        state = torch.concat((state,te[:,-1:,:]),dim=-1)    #(B,1,TF+tim_dim)
-        state = self.fc_state(state)
-
-        grad = (x[:,1:,:] - x[:,:-1,:]).view(B,1,-1)    #(B,1,(T-1)F)
-        grad = torch.concat((grad,te[:,-1:,:]),dim=-1)    #(B,1,(T-1)F+tim_dim)
-        grad = self.fc_grad(grad)
-
-        out = torch.concat((state,grad),dim=1)
-
-        out = self.ln(out)
-
-        return out
+        x = x.view(B, N, self.sample_len, self.features)
+        
+        x = x.mean(dim=1)  # (B,T,F)
+        
+        # Trend token
+        x_t = x.transpose(1, 2)  # (B,F,T)
+        trend = self.trend_conv(x_t)  # (B,emb_dim,T)
+        trend_token = trend.mean(dim=-1)  # (B,emb_dim)
+        
+        # Seasonality token
+        season = self.season_conv(x_t)[:, :, :self.sample_len]  # (B,emb_dim,T)
+        season_token = season.max(dim=-1)[0]  # (B,emb_dim)
+        
+        # Residual token
+        x_flat = x.reshape(B, -1)  # (B,T*F)
+        residual_input = torch.cat([x_flat, te[:,-1,:]], dim=1)
+        residual_token = self.residual_fc(residual_input)  # (B,emb_dim)
+        
+        tokens = torch.stack([trend_token, season_token, residual_token], dim=1)
+        tokens = self.dropout(tokens)
+        tokens = self.ln(tokens)
+        
+        return tokens
     
 
 class Node2Token(nn.Module):
@@ -178,6 +174,7 @@ class AICLLM(nn.Module):
                  use_time_token: bool = True,
                  use_sandglassAttn: bool = True,
                  use_diff: int=1,
+                 use_anchor: int=0,
                  t_dim: int = 64, trunc_k=16, wo_conloss=False) :
         super(AICLLM, self).__init__()
 
@@ -190,6 +187,7 @@ class AICLLM(nn.Module):
         self.use_time_token = use_time_token
         self.sag_tokens = sag_tokens
         self.use_diff = use_diff
+        self.use_anchor = use_anchor
 
         self.topological_sort_node = True
 
@@ -279,8 +277,9 @@ class AICLLM(nn.Module):
         time_tokens_idx = st_embedding.shape[1]
         st_embedding = torch.concat((time_tokens, st_embedding), dim=1)  
 
-        ta_tokens = self.time_anchor_tokenizer(xa, te)
-        st_embedding = torch.concat((ta_tokens, st_embedding), dim=1)
+        if self.use_anchor == 1:
+            ta_tokens = self.time_anchor_tokenizer(xa, te)
+            st_embedding = torch.concat((ta_tokens, st_embedding), dim=1)
 
         if prompt_prefix is not None:
             prompt_len,_ = prompt_prefix.shape
