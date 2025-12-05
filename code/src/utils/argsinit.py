@@ -35,8 +35,7 @@ def AddModelArgs(parser):
     parser.add_argument("--wo_conloss" , action="store_true")
     parser.add_argument("--sag_dim", default=128, type=int)
     parser.add_argument("--sag_tokens", default=128, type=int)
-    parser.add_argument("--use_diff", default=1, type=int)
-    parser.add_argument("--use_anchor", default=0, type=int)
+    parser.add_argument("--use_anchor_diff_token", default=0, type=int)
 
 
 def AddDataArgs(parser):
