@@ -3,7 +3,7 @@ python main.py \
     --data_path '../../data/traffic/PEMS03/PEMS03.npz' \
     --adj_filename ../../data/traffic/PEMS03/PEMS03.csv \
     --dataset PEMS03FLOW \
-    --desc use_anchor_sag_PEMS03_pre\
+    --desc use_anchor_linear_PEMS03_pre\
     --sample_len 12 \
     --predict_len 12 \
     --train_ratio 0.6 \
@@ -27,7 +27,6 @@ python main.py \
     --trunc_k 64 \
     --weight_decay 0 \
     --task prediction \
-    --sandglassAttn \
     --sag_dim 128 \
     --sag_tokens 128 \
     --input_dim 1\
@@ -38,7 +37,7 @@ python main.py \
     --data_path '../../data/traffic/PEMS03/PEMS03.npz' \
     --adj_filename ../../data/traffic/PEMS03/PEMS03.csv \
     --dataset PEMS03FLOW \
-    --desc sag_PEMS03_pre\
+    --desc linear_PEMS03_pre\
     --sample_len 12 \
     --predict_len 12 \
     --train_ratio 0.6 \
@@ -62,7 +61,6 @@ python main.py \
     --trunc_k 64 \
     --weight_decay 0 \
     --task prediction \
-    --sandglassAttn \
     --sag_dim 128 \
     --sag_tokens 128 \
     --input_dim 1\
@@ -73,7 +71,7 @@ python main.py \
     --data_path '../../data/traffic/PEMS03/PEMS03.npz' \
     --adj_filename ../../data/traffic/PEMS03/PEMS03.csv \
     --dataset PEMS03FLOW \
-    --desc use_anchor_diff_token__sag_PEMS03_pre\
+    --desc use_anchor_diff_token__linear_PEMS03_pre\
     --sample_len 12 \
     --predict_len 12 \
     --train_ratio 0.6 \
@@ -97,7 +95,6 @@ python main.py \
     --trunc_k 64 \
     --weight_decay 0 \
     --task prediction \
-    --sandglassAttn \
     --sag_dim 128 \
     --sag_tokens 128 \
     --input_dim 1\

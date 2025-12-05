@@ -3,7 +3,7 @@ from torch import nn
 import numpy as np
 from utils.utils import lap_eig, topological_sort
 from typing import Optional
-from model.sandglassAttn import SpatialEncoder, SpatialDecoder, LinearEncoder, LinearDecoder
+from model.sandglassAttn import SpatialEncoder, SpatialDecoder, LinearEncoder, LinearDecoder, SAG
 from model.embedding import TimeEmbedding, NodeEmbedding
 from model.tokenizer import AnchorDiffTokenizer, Time2Token, Node2Token
 
@@ -62,8 +62,16 @@ class AICLLM(nn.Module):
         )
 
         # Optional Anchor-Diff Tokenizer
-        if self.use_anchor_diff_token:
+        if self.use_anchor_diff_token == 1:
             self.anchor_diff_tokenizer = AnchorDiffTokenizer(
+                sample_len=sample_len, 
+                features=input_dim, 
+                emb_dim=self.emb_dim, 
+                tim_dim=tim_dim, 
+                drop_out=dropout
+            )
+        elif self.use_anchor_diff_token == 2:
+            self.anchor_tokenizer = Time2Token(
                 sample_len=sample_len, 
                 features=input_dim, 
                 emb_dim=self.emb_dim, 
@@ -85,17 +93,24 @@ class AICLLM(nn.Module):
         self.node_embedding = NodeEmbedding(adj_mx=adj_mx, node_emb_dim=node_emb_dim, k=trunc_k, dropout=dropout)
         self.time_embedding = TimeEmbedding(t_dim=t_dim)
 
-        if use_sandglassAttn:
-            self.precoder = SpatialEncoder(
+        if self.use_sandglassAttn:
+            # self.precoder = SpatialEncoder(
+            #     sag_dim=sag_dim,
+            #     sag_tokens=sag_tokens,
+            #     emb_dim=self.emb_dim,
+            #     dropout=dropout
+            # )
+            # self.decoder = SpatialDecoder(
+            #     sag_dim=sag_dim,
+            #     emb_dim=self.emb_dim,
+            #     dropout=dropout
+            # )
+            self.sag = SAG(
                 sag_dim=sag_dim,
                 sag_tokens=sag_tokens,
                 emb_dim=self.emb_dim,
-                dropout=dropout
-            )
-            self.decoder = SpatialDecoder(
-                sag_dim=sag_dim,
-                emb_dim=self.emb_dim,
-                dropout=dropout
+                dropout=dropout,
+                use_node_embedding=use_node_embedding
             )
         else:
             N = self.adj_mx.shape[0]
@@ -117,8 +132,8 @@ class AICLLM(nn.Module):
         other_loss = []
         
         x_spatial = x
-        if self.use_diff:
-             x_spatial = x - xa
+        # if self.use_diff:
+        x_diff = x - xa
 
         timestamp = timestamp[:, :self.sample_len, :]
         te = self.time_embedding(timestamp) 
@@ -134,7 +149,10 @@ class AICLLM(nn.Module):
         s_num = self.sag_tokens
         
         # Precoder
-        st_embedding, attn_weights = self.precoder(st_embedding)
+        if self.use_sandglassAttn:
+            st_embedding, attn_weights = self.sag.encoder(st_embedding)
+        else:
+            st_embedding = self.precoder(st_embedding)  
         
         if self.use_sandglassAttn and not self.wo_conloss:
             # Only calculate consistency loss if using Attention
@@ -152,9 +170,12 @@ class AICLLM(nn.Module):
         time_tokens_idx = st_embedding.shape[1]
         st_embedding = torch.concat((time_tokens, st_embedding), dim=1)  
 
-        if self.use_anchor_diff_token:
+        if self.use_anchor_diff_token == 1:
             ad_tokens = self.anchor_diff_tokenizer(x, xa, te)
             st_embedding = torch.concat((ad_tokens, st_embedding), dim=1)
+        elif self.use_anchor_diff_token == 2:
+            anchor_tokens = self.anchor_tokenizer(xa, te)
+            st_embedding = torch.concat((anchor_tokens, st_embedding), dim=1)
         
         if prompt_prefix is not None:
             prompt_len,_ = prompt_prefix.shape
@@ -168,7 +189,10 @@ class AICLLM(nn.Module):
         s_state = hidden_state[:, -s_num:, :]  
 
         # Decoder
-        s_state = self.decoder(s_state, spatial_tokens)  
+        if self.use_sandglassAttn:
+            s_state = self.sag.decoder(s_state, spatial_tokens)
+        else:
+            s_state = self.decoder(s_state, spatial_tokens)  
         s_state += spatial_tokens
 
         if self.topological_sort_node:
