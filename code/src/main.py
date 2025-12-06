@@ -22,7 +22,7 @@ wandb.login(key = 'c18f56f87b92b4296251b454a8556397e6153841')
 
 
 random_str = lambda : ''.join(random.sample(string.ascii_letters + string.digits, 6))
-seed=2025
+seed=1412
 random.seed(seed)
 np.random.seed(seed)
 torch.manual_seed(seed)

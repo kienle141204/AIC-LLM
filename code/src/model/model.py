@@ -32,6 +32,7 @@ class AICLLM(nn.Module):
                  use_time_token: bool = True,
                  use_sandglassAttn: bool = True,
                  use_anchor_diff_token: int = 0,
+                 use_diff: int = 0,
                  t_dim: int = 64, trunc_k=16, wo_conloss=False) :
         super(AICLLM, self).__init__()
 
@@ -47,6 +48,7 @@ class AICLLM(nn.Module):
         self.use_anchor_diff_token = use_anchor_diff_token
         self.adj_mx = adj_mx
         self.dis_mx = dis_mx
+        self.use_diff = use_diff 
 
         self.topological_sort_node = True
 
@@ -54,7 +56,6 @@ class AICLLM(nn.Module):
         tim_dim = t_dim*2     #day, week
         self.setadj(adj_mx,dis_mx)
         
-        # Original Time Tokenizer (always used for x)
         self.time_tokenizer = Time2Token(
             sample_len=sample_len, 
             features=input_dim, 
@@ -63,23 +64,20 @@ class AICLLM(nn.Module):
             drop_out=dropout
         )
 
-        # Optional Anchor-Diff Tokenizer
-        if self.use_anchor_diff_token == 1:
-            self.anchor_diff_tokenizer = AnchorDiffTokenizer(
-                sample_len=sample_len, 
-                features=input_dim, 
-                emb_dim=self.emb_dim, 
-                tim_dim=tim_dim, 
-                drop_out=dropout
-            )
-        elif self.use_anchor_diff_token == 2:
-            self.anchor_tokenizer = Time2Token(
-                sample_len=sample_len, 
-                features=input_dim, 
-                emb_dim=self.emb_dim, 
-                tim_dim=tim_dim, 
-                drop_out=dropout
-            )
+        self.anchor_diff_tokenizer = AnchorDiffTokenizer(
+            sample_len=sample_len, 
+            features=input_dim, 
+            emb_dim=self.emb_dim, 
+            tim_dim=tim_dim, 
+            drop_out=dropout
+        )
+        self.anchor_tokenizer = Time2Token(
+            sample_len=sample_len, 
+            features=input_dim, 
+            emb_dim=self.emb_dim, 
+            tim_dim=tim_dim, 
+            drop_out=dropout
+        )
         
 
         self.node_tokenizer = Node2Token(
@@ -96,17 +94,6 @@ class AICLLM(nn.Module):
         self.time_embedding = TimeEmbedding(t_dim=t_dim)
 
         if self.use_sandglassAttn:
-            # self.precoder = SpatialEncoder(
-            #     sag_dim=sag_dim,
-            #     sag_tokens=sag_tokens,
-            #     emb_dim=self.emb_dim,
-            #     dropout=dropout
-            # )
-            # self.decoder = SpatialDecoder(
-            #     sag_dim=sag_dim,
-            #     emb_dim=self.emb_dim,
-            #     dropout=dropout
-            # )
             self.sag = SAG(sag_dim=sag_dim, 
                            sag_tokens=sag_tokens, 
                            emb_dim=self.emb_dim, 
@@ -114,10 +101,7 @@ class AICLLM(nn.Module):
                            features=input_dim ,
                            dropout=dropout
                            )
-        else:
-            N = self.adj_mx.shape[0]
-            self.precoder = LinearEncoder(num_nodes=N, sag_tokens=sag_tokens)
-            self.decoder = LinearDecoder(num_nodes=N, sag_tokens=sag_tokens)
+
 
         self.wo_conloss = wo_conloss
         
@@ -134,8 +118,10 @@ class AICLLM(nn.Module):
         other_loss = []
         
         x_spatial = x
-        # if self.use_diff:
-        x_diff = x - xa
+        if self.use_diff == 1:
+            x_diff = x - xa
+        else:
+            x_diff = xa
 
         timestamp = timestamp[:, :self.sample_len, :]
         te = self.time_embedding(timestamp) 
