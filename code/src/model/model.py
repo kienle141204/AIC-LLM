@@ -31,7 +31,7 @@ class AICLLM(nn.Module):
                  use_node_embedding: bool = True,
                  use_time_token: bool = True,
                  use_sandglassAttn: bool = True,
-                 use_anchor_diff_token: bool = False,
+                 use_anchor_diff_token: int = 0,
                  t_dim: int = 64, trunc_k=16, wo_conloss=False) :
         super(AICLLM, self).__init__()
 
@@ -45,6 +45,8 @@ class AICLLM(nn.Module):
         self.sag_tokens = sag_tokens
         self.use_sandglassAttn = use_sandglassAttn
         self.use_anchor_diff_token = use_anchor_diff_token
+        self.adj_mx = adj_mx
+        self.dis_mx = dis_mx
 
         self.topological_sort_node = True
 
@@ -105,13 +107,13 @@ class AICLLM(nn.Module):
             #     emb_dim=self.emb_dim,
             #     dropout=dropout
             # )
-            self.sag = SAG(
-                sag_dim=sag_dim,
-                sag_tokens=sag_tokens,
-                emb_dim=self.emb_dim,
-                dropout=dropout,
-                use_node_embedding=use_node_embedding
-            )
+            self.sag = SAG(sag_dim=sag_dim, 
+                           sag_tokens=sag_tokens, 
+                           emb_dim=self.emb_dim, 
+                           sample_len=sample_len, 
+                           features=input_dim ,
+                           dropout=dropout
+                           )
         else:
             N = self.adj_mx.shape[0]
             self.precoder = LinearEncoder(num_nodes=N, sag_tokens=sag_tokens)
@@ -150,9 +152,10 @@ class AICLLM(nn.Module):
         
         # Precoder
         if self.use_sandglassAttn:
-            st_embedding, attn_weights = self.sag.encoder(st_embedding)
+            st_embedding, attn_weights = self.sag.encode(st_embedding)
         else:
-            st_embedding = self.precoder(st_embedding)  
+            st_embedding, attn_weights = self.precoder(st_embedding)
+
         
         if self.use_sandglassAttn and not self.wo_conloss:
             # Only calculate consistency loss if using Attention
@@ -174,7 +177,7 @@ class AICLLM(nn.Module):
             ad_tokens = self.anchor_diff_tokenizer(x, xa, te)
             st_embedding = torch.concat((ad_tokens, st_embedding), dim=1)
         elif self.use_anchor_diff_token == 2:
-            anchor_tokens = self.anchor_tokenizer(xa, te)
+            anchor_tokens = self.anchor_tokenizer(x_diff, te)
             st_embedding = torch.concat((anchor_tokens, st_embedding), dim=1)
         
         if prompt_prefix is not None:
@@ -190,7 +193,7 @@ class AICLLM(nn.Module):
 
         # Decoder
         if self.use_sandglassAttn:
-            s_state = self.sag.decoder(s_state, spatial_tokens)
+            s_state = self.sag.decode(s_state, spatial_tokens)
         else:
             s_state = self.decoder(s_state, spatial_tokens)  
         s_state += spatial_tokens
