@@ -64,20 +64,22 @@ class AICLLM(nn.Module):
             drop_out=dropout
         )
 
-        self.anchor_diff_tokenizer = AnchorDiffTokenizer(
-            sample_len=sample_len, 
-            features=input_dim, 
-            emb_dim=self.emb_dim, 
-            tim_dim=tim_dim, 
-            drop_out=dropout
-        )
-        self.anchor_tokenizer = Time2Token(
-            sample_len=sample_len, 
-            features=input_dim, 
-            emb_dim=self.emb_dim, 
-            tim_dim=tim_dim, 
-            drop_out=dropout
-        )
+        if self.use_anchor_diff_token == 1:
+            self.anchor_diff_tokenizer = AnchorDiffTokenizer(
+                sample_len=sample_len, 
+                features=input_dim, 
+                emb_dim=self.emb_dim, 
+                tim_dim=tim_dim, 
+                drop_out=dropout
+            )
+        elif self.use_anchor_diff_token == 2:
+            self.anchor_tokenizer = Time2Token(
+                sample_len=sample_len, 
+                features=input_dim, 
+                emb_dim=self.emb_dim, 
+                tim_dim=tim_dim, 
+                drop_out=dropout
+            )   
         
 
         self.node_tokenizer = Node2Token(
