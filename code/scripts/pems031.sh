@@ -3,7 +3,7 @@ python main.py \
     --data_path '../../data/traffic/PEMS03/PEMS03.npz' \
     --adj_filename ../../data/traffic/PEMS03/PEMS03.csv \
     --dataset PEMS03FLOW \
-    --desc use_anchor_linear_PEMS03_pre\
+    --desc xa_PEMS03_pre\
     --sample_len 12 \
     --predict_len 12 \
     --train_ratio 0.6 \
@@ -31,72 +31,73 @@ python main.py \
     --sag_tokens 128 \
     --input_dim 1\
     --output_dim 1 \
-    --use_anchor_diff_token 2
+    --use_anchor_diff_token 2 \
+    --use_diff 0
 
-python main.py \
-    --data_path '../../data/traffic/PEMS03/PEMS03.npz' \
-    --adj_filename ../../data/traffic/PEMS03/PEMS03.csv \
-    --dataset PEMS03FLOW \
-    --desc linear_PEMS03_pre\
-    --sample_len 12 \
-    --predict_len 12 \
-    --train_ratio 0.6 \
-    --val_ratio 0.2 \
-    --epoch 500 \
-    --val_epoch 1 \
-    --test_epoch 5 \
-    --batch_size 64\
-    --lr 0.001 \
-    --causal 0 \
-    --model gpt2 \
-    --patience 50 \
-    --ln_grad \
-    --lora \
-    --t_dim 64 \
-    --node_emb_dim 64 \
-    --node_embedding \
-    --llm_layers 3 \
-    --time_token \
-    --dropout 0.05 \
-    --trunc_k 64 \
-    --weight_decay 0 \
-    --task prediction \
-    --sag_dim 128 \
-    --sag_tokens 128 \
-    --input_dim 1\
-    --output_dim 1 \
-    --use_anchor_diff_token 0
+# python main.py \
+#     --data_path '../../data/traffic/PEMS03/PEMS03.npz' \
+#     --adj_filename ../../data/traffic/PEMS03/PEMS03.csv \
+#     --dataset PEMS03FLOW \
+#     --desc linear_PEMS03_pre\
+#     --sample_len 12 \
+#     --predict_len 12 \
+#     --train_ratio 0.6 \
+#     --val_ratio 0.2 \
+#     --epoch 500 \
+#     --val_epoch 1 \
+#     --test_epoch 5 \
+#     --batch_size 64\
+#     --lr 0.001 \
+#     --causal 0 \
+#     --model gpt2 \
+#     --patience 50 \
+#     --ln_grad \
+#     --lora \
+#     --t_dim 64 \
+#     --node_emb_dim 64 \
+#     --node_embedding \
+#     --llm_layers 3 \
+#     --time_token \
+#     --dropout 0.05 \
+#     --trunc_k 64 \
+#     --weight_decay 0 \
+#     --task prediction \
+#     --sag_dim 128 \
+#     --sag_tokens 128 \
+#     --input_dim 1\
+#     --output_dim 1 \
+#     --use_anchor_diff_token 0
 
-python main.py \
-    --data_path '../../data/traffic/PEMS03/PEMS03.npz' \
-    --adj_filename ../../data/traffic/PEMS03/PEMS03.csv \
-    --dataset PEMS03FLOW \
-    --desc use_anchor_diff_token__linear_PEMS03_pre\
-    --sample_len 12 \
-    --predict_len 12 \
-    --train_ratio 0.6 \
-    --val_ratio 0.2 \
-    --epoch 500 \
-    --val_epoch 1 \
-    --test_epoch 5 \
-    --batch_size 64\
-    --lr 0.001 \
-    --causal 0 \
-    --model gpt2 \
-    --patience 50 \
-    --ln_grad \
-    --lora \
-    --t_dim 64 \
-    --node_emb_dim 64 \
-    --node_embedding \
-    --llm_layers 3 \
-    --time_token \
-    --dropout 0.05 \
-    --trunc_k 64 \
-    --weight_decay 0 \
-    --task prediction \
-    --sag_dim 128 \
-    --sag_tokens 128 \
-    --input_dim 1\
-    --output_dim 1 \
-    --use_anchor_diff_token 1
+# python main.py \
+#     --data_path '../../data/traffic/PEMS03/PEMS03.npz' \
+#     --adj_filename ../../data/traffic/PEMS03/PEMS03.csv \
+#     --dataset PEMS03FLOW \
+#     --desc use_anchor_diff_token__linear_PEMS03_pre\
+#     --sample_len 12 \
+#     --predict_len 12 \
+#     --train_ratio 0.6 \
+#     --val_ratio 0.2 \
+#     --epoch 500 \
+#     --val_epoch 1 \
+#     --test_epoch 5 \
+#     --batch_size 64\
+#     --lr 0.001 \
+#     --causal 0 \
+#     --model gpt2 \
+#     --patience 50 \
+#     --ln_grad \
+#     --lora \
+#     --t_dim 64 \
+#     --node_emb_dim 64 \
+#     --node_embedding \
+#     --llm_layers 3 \
+#     --time_token \
+#     --dropout 0.05 \
+#     --trunc_k 64 \
+#     --weight_decay 0 \
+#     --task prediction \
+#     --sag_dim 128 \
+#     --sag_tokens 128 \
+#     --input_dim 1\
+#     --output_dim 1 \
+#     --use_anchor_diff_token 1
