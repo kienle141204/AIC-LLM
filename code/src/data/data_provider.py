@@ -85,20 +85,16 @@ class DataProvider():
                     'flow': flow_values
                 })
                 
-                # Tính trung bình, bỏ qua giá trị 0 (missing data)
                 def get_mean_without_null(data):
                     return data[data != 0].mean() if (data != 0).any() else 0
                 
                 avg_by_wdt = df.groupby('weekdaytime')['flow'].apply(get_mean_without_null)
                 
-                # Lưu vào dict
                 for wdt, avg_val in avg_by_wdt.items():
                     weekly_avg_dict[(node_idx, feature_idx, wdt)] = avg_val
         
-        # Tạo tensor chứa weekly average cho toàn bộ data
         weekly_avg_full = torch.zeros_like(self.data)
         
-        # Tính weekdaytime cho toàn bộ data
         full_weekday = self.timestamp[:, 2]
         full_hour = self.timestamp[:, 3]
         full_minute = self.timestamp[:, 4]

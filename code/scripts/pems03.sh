@@ -33,7 +33,8 @@ python main.py \
     --input_dim 1\
     --output_dim 1 \
     --use_anchor_diff_token 2 \
-    --use_diff 1
+    --use_diff 1 \
+    --use_sep_token
 
 # python main.py \
 #     --data_path '../../data/traffic/PEMS03/PEMS03.npz' \

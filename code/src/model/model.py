@@ -33,6 +33,7 @@ class AICLLM(nn.Module):
                  use_sandglassAttn: bool = True,
                  use_anchor_diff_token: int = 0,
                  use_diff: int = 0,
+                 use_sep_token: bool = True,
                  t_dim: int = 64, trunc_k=16, wo_conloss=False) :
         super(AICLLM, self).__init__()
 
@@ -49,12 +50,17 @@ class AICLLM(nn.Module):
         self.adj_mx = adj_mx
         self.dis_mx = dis_mx
         self.use_diff = use_diff 
+        self.use_sep_token = use_sep_token
 
         self.topological_sort_node = True
 
         self.emb_dim = basemodel.dim
         tim_dim = t_dim*2     #day, week
         self.setadj(adj_mx,dis_mx)
+        
+        if self.use_sep_token:
+            self.sep_token = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
+            nn.init.normal_(self.sep_token, std=0.02)
         
         self.time_tokenizer = Time2Token(
             sample_len=sample_len, 
@@ -158,21 +164,39 @@ class AICLLM(nn.Module):
         
         # Time Tokenizer
         time_tokens = self.time_tokenizer(x, te)
+        
+        sep = None
+        if self.use_sep_token:
+            sep = self.sep_token.repeat(B, 1, 1)
+
         time_tokens_idx = st_embedding.shape[1]
-        st_embedding = torch.concat((time_tokens, st_embedding), dim=1)  
+        
+        if self.use_sep_token:
+            st_embedding = torch.concat((time_tokens, sep, st_embedding), dim=1)  
+        else:
+            st_embedding = torch.concat((time_tokens, st_embedding), dim=1)
 
         if self.use_anchor_diff_token == 1:
             ad_tokens = self.anchor_diff_tokenizer(x, xa, te)
-            st_embedding = torch.concat((ad_tokens, st_embedding), dim=1)
+            if self.use_sep_token:
+                st_embedding = torch.concat((ad_tokens, sep, st_embedding), dim=1)
+            else:
+                st_embedding = torch.concat((ad_tokens, st_embedding), dim=1)
         elif self.use_anchor_diff_token == 2:
             anchor_tokens = self.anchor_tokenizer(x_diff, te)
-            st_embedding = torch.concat((anchor_tokens, st_embedding), dim=1)
+            if self.use_sep_token:
+                st_embedding = torch.concat((anchor_tokens, sep, st_embedding), dim=1)
+            else:
+                st_embedding = torch.concat((anchor_tokens, st_embedding), dim=1)
         
         if prompt_prefix is not None:
             prompt_len,_ = prompt_prefix.shape
             prompt_embedding = self.basemodel.getembedding(prompt_prefix).view(1,prompt_len,-1)
             prompt_embedding = prompt_embedding.repeat(B,1,1)
-            st_embedding = torch.concat([prompt_embedding,st_embedding],dim=1)
+            if self.use_sep_token:
+                st_embedding = torch.concat([prompt_embedding, sep, st_embedding],dim=1)
+            else:
+                st_embedding = torch.concat([prompt_embedding, st_embedding],dim=1)
         
         hidden_state = st_embedding
 
@@ -190,7 +214,12 @@ class AICLLM(nn.Module):
             s_state = s_state[:,self.node_order_rev,:]
 
         if self.use_time_token:
-            t_state = hidden_state[:,-time_tokens_idx-1:-time_tokens_idx,:]
+            if self.use_sep_token:
+                # Shifted by 1 due to sep token between Time and Spatial
+                t_state = hidden_state[:,-time_tokens_idx-2:-time_tokens_idx-1,:]
+            else:
+                t_state = hidden_state[:,-time_tokens_idx-1:-time_tokens_idx,:]
+                
             t_state += time_tokens[:,-1:,:]
             s_state += t_state
 

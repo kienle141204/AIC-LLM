@@ -37,6 +37,7 @@ def AddModelArgs(parser):
     parser.add_argument("--sag_tokens", default=128, type=int)
     parser.add_argument("--use_anchor_diff_token", default=0, type=int, help="use_anchor_diff=1, use_anchor=2")
     parser.add_argument("--use_diff", default=0, type=int, help="use_diff=1")
+    parser.add_argument("--use_sep_token", action="store_true")
 
 
 def AddDataArgs(parser):
