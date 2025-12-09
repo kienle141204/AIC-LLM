@@ -3,7 +3,7 @@ python main.py \
     --data_path '../../data/traffic/PEMS03/PEMS03.npz' \
     --adj_filename ../../data/traffic/PEMS03/PEMS03.csv \
     --dataset PEMS03FLOW \
-    --desc xd_PEMS03_pre\
+    --desc sep_PEMS03_pre\
     --sample_len 12 \
     --predict_len 12 \
     --train_ratio 0.6 \
@@ -33,7 +33,7 @@ python main.py \
     --input_dim 1\
     --output_dim 1 \
     --use_anchor_diff_token 2 \
-    --use_diff 1 \
+    --use_diff 0 \
     --use_sep_token
 
 # python main.py \

@@ -59,8 +59,10 @@ class AICLLM(nn.Module):
         self.setadj(adj_mx,dis_mx)
         
         if self.use_sep_token:
-            self.sep_token = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
-            nn.init.normal_(self.sep_token, std=0.02)
+            self.sep_token_1 = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
+            nn.init.normal_(self.sep_token_1, std=0.02)
+            self.sep_token_2 = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
+            nn.init.normal_(self.sep_token_2, std=0.02)
         
         self.time_tokenizer = Time2Token(
             sample_len=sample_len, 
@@ -165,27 +167,29 @@ class AICLLM(nn.Module):
         # Time Tokenizer
         time_tokens = self.time_tokenizer(x, te)
         
-        sep = None
+        sep_1 = None
+        sep_2 = None
         if self.use_sep_token:
-            sep = self.sep_token.repeat(B, 1, 1)
+            sep_1 = self.sep_token_1.repeat(B, 1, 1)
+            sep_2 = self.sep_token_2.repeat(B, 1, 1)
 
         time_tokens_idx = st_embedding.shape[1]
         
         if self.use_sep_token:
-            st_embedding = torch.concat((time_tokens, sep, st_embedding), dim=1)  
+            st_embedding = torch.concat((time_tokens, sep_1, st_embedding), dim=1)  
         else:
             st_embedding = torch.concat((time_tokens, st_embedding), dim=1)
 
         if self.use_anchor_diff_token == 1:
             ad_tokens = self.anchor_diff_tokenizer(x, xa, te)
             if self.use_sep_token:
-                st_embedding = torch.concat((ad_tokens, sep, st_embedding), dim=1)
+                st_embedding = torch.concat((ad_tokens, sep_2, st_embedding), dim=1)
             else:
                 st_embedding = torch.concat((ad_tokens, st_embedding), dim=1)
         elif self.use_anchor_diff_token == 2:
             anchor_tokens = self.anchor_tokenizer(x_diff, te)
             if self.use_sep_token:
-                st_embedding = torch.concat((anchor_tokens, sep, st_embedding), dim=1)
+                st_embedding = torch.concat((anchor_tokens, sep_2, st_embedding), dim=1)
             else:
                 st_embedding = torch.concat((anchor_tokens, st_embedding), dim=1)
         
