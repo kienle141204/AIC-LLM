@@ -34,6 +34,10 @@ class AICLLM(nn.Module):
                  use_anchor_diff_token: int = 0,
                  use_diff: int = 0,
                  use_sep_token: bool = True,
+                 use_task_token: bool = True,
+                 use_context_token: bool = True,
+                 use_quality_token: bool = True,
+                 task_type: str = 'prediction',
                  t_dim: int = 64, trunc_k=16, wo_conloss=False) :
         super(AICLLM, self).__init__()
 
@@ -51,6 +55,10 @@ class AICLLM(nn.Module):
         self.dis_mx = dis_mx
         self.use_diff = use_diff 
         self.use_sep_token = use_sep_token
+        self.use_task_token = use_task_token
+        self.use_context_token = use_context_token
+        self.use_quality_token = use_quality_token
+        self.task_type = task_type
 
         self.topological_sort_node = True
 
@@ -58,11 +66,51 @@ class AICLLM(nn.Module):
         tim_dim = t_dim*2     #day, week
         self.setadj(adj_mx,dis_mx)
         
+        # ===== SEPARATOR TOKENS =====
         if self.use_sep_token:
             self.sep_token_1 = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
             nn.init.normal_(self.sep_token_1, std=0.02)
             self.sep_token_2 = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
             nn.init.normal_(self.sep_token_2, std=0.02)
+        
+        # ===== TASK TOKENS (Self-RAG inspired) =====
+        # Learnable tokens to indicate task type - similar to [CLS] token in BERT
+        if self.use_task_token:
+            self.task_token_forecast = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
+            nn.init.normal_(self.task_token_forecast, std=0.02)
+            self.task_token_imputation = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
+            nn.init.normal_(self.task_token_imputation, std=0.02)
+        
+        # ===== CONTEXT TOKEN (Global summary token) =====
+        # Summarizes the entire input context - similar to segment embedding
+        if self.use_context_token:
+            self.context_token = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
+            nn.init.normal_(self.context_token, std=0.02)
+            # Context aggregation network
+            self.context_aggregator = nn.Sequential(
+                nn.Linear(sample_len * input_dim, self.emb_dim),
+                nn.GELU(),
+                nn.Linear(self.emb_dim, self.emb_dim),
+                nn.LayerNorm(self.emb_dim)
+            )
+        
+        # ===== QUALITY ASSESSMENT TOKEN (Self-RAG's ISREL inspired) =====
+        # Evaluates the reliability/quality of input data
+        if self.use_quality_token:
+            self.quality_token_high = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
+            nn.init.normal_(self.quality_token_high, std=0.02)
+            self.quality_token_low = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
+            nn.init.normal_(self.quality_token_low, std=0.02)
+            # Quality scorer network - outputs quality score [0, 1]
+            self.quality_scorer = nn.Sequential(
+                nn.Linear(sample_len * input_dim, 128),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(128, 32),
+                nn.ReLU(),
+                nn.Linear(32, 1),
+                nn.Sigmoid()
+            )
         
         self.time_tokenizer = Time2Token(
             sample_len=sample_len, 
@@ -137,6 +185,36 @@ class AICLLM(nn.Module):
         te = self.time_embedding(timestamp) 
         ne = self.node_embedding()
 
+        # ===== SPECIAL TOKENS PREPARATION (Self-RAG inspired) =====
+        special_tokens_list = []
+        
+        # 1. TASK TOKEN - Indicates the task type (forecast/imputation)
+        if self.use_task_token:
+            if self.task_type == 'prediction':
+                task_token = self.task_token_forecast.repeat(B, 1, 1)
+            else:  # imputation
+                task_token = self.task_token_imputation.repeat(B, 1, 1)
+            special_tokens_list.append(task_token)
+        
+        # 2. QUALITY TOKEN - Assesses input data reliability (ISREL inspired)
+        if self.use_quality_token:
+            # Calculate quality score from input data
+            x_flat = x.mean(dim=1)  # Average over nodes: (B, TF)
+            quality_score = self.quality_scorer(x_flat)  # (B, 1)
+            # Interpolate between high and low quality tokens based on score
+            quality_token = (quality_score.unsqueeze(-1) * self.quality_token_high + 
+                           (1 - quality_score.unsqueeze(-1)) * self.quality_token_low)
+            quality_token = quality_token.repeat(1, 1, 1)  # (B, 1, emb_dim)
+            special_tokens_list.append(quality_token)
+        
+        # 3. CONTEXT TOKEN - Global summary of input context
+        if self.use_context_token:
+            # Aggregate context from all nodes
+            x_context = x.mean(dim=1)  # (B, TF)
+            context_embedding = self.context_aggregator(x_context)  # (B, emb_dim)
+            context_token = self.context_token.repeat(B, 1, 1) + context_embedding.unsqueeze(1)
+            special_tokens_list.append(context_token)
+
         # spatial tokenizer 
         spatial_tokens = self.node_tokenizer(x_spatial, te, ne)  # (B, N, emb_dim)
         if self.topological_sort_node:
@@ -169,6 +247,7 @@ class AICLLM(nn.Module):
         
         sep_1 = None
         sep_2 = None
+        sep_3 = None
         if self.use_sep_token:
             sep_1 = self.sep_token_1.repeat(B, 1, 1)
             sep_2 = self.sep_token_2.repeat(B, 1, 1)
@@ -193,12 +272,18 @@ class AICLLM(nn.Module):
             else:
                 st_embedding = torch.concat((anchor_tokens, st_embedding), dim=1)
         
+        # ===== PREPEND SPECIAL TOKENS (Self-RAG style) =====
+        # Final sequence: [TASK] | [QUALITY] | [CONTEXT] | [ANCHOR_DIFF] | [SEP] | [TIME] | [SEP] | [SPATIAL]
+        if len(special_tokens_list) > 0:
+            special_tokens = torch.concat(special_tokens_list, dim=1)  # (B, num_special, emb_dim)
+            st_embedding = torch.concat([special_tokens, st_embedding], dim=1)
+        
         if prompt_prefix is not None:
             prompt_len,_ = prompt_prefix.shape
             prompt_embedding = self.basemodel.getembedding(prompt_prefix).view(1,prompt_len,-1)
             prompt_embedding = prompt_embedding.repeat(B,1,1)
             if self.use_sep_token:
-                st_embedding = torch.concat([prompt_embedding, sep, st_embedding],dim=1)
+                st_embedding = torch.concat([prompt_embedding, sep_1, st_embedding],dim=1)
             else:
                 st_embedding = torch.concat([prompt_embedding, st_embedding],dim=1)
         
