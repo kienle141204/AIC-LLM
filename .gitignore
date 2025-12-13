@@ -10,3 +10,4 @@ code/wandb
 .tmp.*
 
 code/logs/*
+logs/*

@@ -35,6 +35,7 @@ python main.py \
     --use_anchor_diff_token 2 \
     --use_diff 0 \
     --use_sep_token \
+    --use_adaptive_sep \
     --use_task_token \
     --use_context_token \
     --use_quality_token

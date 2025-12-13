@@ -38,6 +38,7 @@ def AddModelArgs(parser):
     parser.add_argument("--use_anchor_diff_token", default=0, type=int, help="use_anchor_diff=1, use_anchor=2")
     parser.add_argument("--use_diff", default=0, type=int, help="use_diff=1")
     parser.add_argument("--use_sep_token", action="store_true")
+    parser.add_argument("--use_adaptive_sep", action="store_true", help="Enable adaptive separator that learns from both sides")
     
     # Self-RAG inspired special tokens
     parser.add_argument("--use_task_token", action="store_true", help="Enable task type token (forecast/imputation)")

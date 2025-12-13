@@ -34,6 +34,7 @@ class AICLLM(nn.Module):
                  use_anchor_diff_token: int = 0,
                  use_diff: int = 0,
                  use_sep_token: bool = True,
+                 use_adaptive_sep: bool = False,
                  use_task_token: bool = True,
                  use_context_token: bool = True,
                  use_quality_token: bool = True,
@@ -55,6 +56,7 @@ class AICLLM(nn.Module):
         self.dis_mx = dis_mx
         self.use_diff = use_diff 
         self.use_sep_token = use_sep_token
+        self.use_adaptive_sep = use_adaptive_sep
         self.use_task_token = use_task_token
         self.use_context_token = use_context_token
         self.use_quality_token = use_quality_token
@@ -66,23 +68,37 @@ class AICLLM(nn.Module):
         tim_dim = t_dim*2     #day, week
         self.setadj(adj_mx,dis_mx)
         
-        # ===== SEPARATOR TOKENS =====
+        # separator token
         if self.use_sep_token:
+            # Base separator tokens
             self.sep_token_1 = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
             nn.init.normal_(self.sep_token_1, std=0.02)
             self.sep_token_2 = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
             nn.init.normal_(self.sep_token_2, std=0.02)
+            
+            # Adaptive separator - learns from both sides
+            if self.use_adaptive_sep:
+                self.sep_adapter_1 = nn.Sequential(
+                    nn.Linear(self.emb_dim * 2, self.emb_dim),
+                    nn.GELU(),
+                    nn.Linear(self.emb_dim, self.emb_dim),
+                    nn.LayerNorm(self.emb_dim)
+                )
+                self.sep_adapter_2 = nn.Sequential(
+                    nn.Linear(self.emb_dim * 2, self.emb_dim),
+                    nn.GELU(),
+                    nn.Linear(self.emb_dim, self.emb_dim),
+                    nn.LayerNorm(self.emb_dim)
+                )
         
-        # ===== TASK TOKENS (Self-RAG inspired) =====
-        # Learnable tokens to indicate task type - similar to [CLS] token in BERT
+        # task token
         if self.use_task_token:
             self.task_token_forecast = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
             nn.init.normal_(self.task_token_forecast, std=0.02)
-            self.task_token_imputation = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
-            nn.init.normal_(self.task_token_imputation, std=0.02)
+            # self.task_token_imputation = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
+            # nn.init.normal_(self.task_token_imputation, std=0.02)
         
-        # ===== CONTEXT TOKEN (Global summary token) =====
-        # Summarizes the entire input context - similar to segment embedding
+        # context token
         if self.use_context_token:
             self.context_token = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
             nn.init.normal_(self.context_token, std=0.02)
@@ -94,14 +110,12 @@ class AICLLM(nn.Module):
                 nn.LayerNorm(self.emb_dim)
             )
         
-        # ===== QUALITY ASSESSMENT TOKEN (Self-RAG's ISREL inspired) =====
-        # Evaluates the reliability/quality of input data
+        # quality token
         if self.use_quality_token:
             self.quality_token_high = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
             nn.init.normal_(self.quality_token_high, std=0.02)
             self.quality_token_low = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
             nn.init.normal_(self.quality_token_low, std=0.02)
-            # Quality scorer network - outputs quality score [0, 1]
             self.quality_scorer = nn.Sequential(
                 nn.Linear(sample_len * input_dim, 128),
                 nn.ReLU(),
@@ -137,7 +151,6 @@ class AICLLM(nn.Module):
                 drop_out=dropout
             )   
         
-
         self.node_tokenizer = Node2Token(
             sample_len=sample_len, 
             features=input_dim, 
@@ -171,6 +184,36 @@ class AICLLM(nn.Module):
 
         self.layer_norm = nn.LayerNorm(self.emb_dim)
     
+    def compute_adaptive_sep(self, left_tokens, right_tokens, sep_base, sep_adapter):
+        """
+        Compute adaptive separator token based on both sides.
+        
+        Args:
+            left_tokens: Tokens on the left side (B, L, D)
+            right_tokens: Tokens on the right side (B, R, D)
+            sep_base: Base separator token parameter
+            sep_adapter: Adapter network for this separator
+        
+        Returns:
+            Adaptive separator token (B, 1, D)
+        """
+        B = left_tokens.shape[0]
+        
+        # Get summary of both sides
+        left_summary = left_tokens.mean(dim=1)   # (B, D)
+        right_summary = right_tokens.mean(dim=1) # (B, D)
+        
+        # Combine information from both sides
+        combined = torch.cat([left_summary, right_summary], dim=-1)  # (B, 2D)
+        
+        # Generate adaptive component
+        adaptive = sep_adapter(combined)  # (B, D)
+        
+        # Final sep = base + adaptive
+        sep = sep_base.repeat(B, 1, 1) + adaptive.unsqueeze(1)  # (B, 1, D)
+        
+        return sep
+    
     def forward(self, x: torch.FloatTensor, xa: torch.FloatTensor, timestamp: torch.Tensor, prompt_prefix: Optional[torch.Tensor]):
         B, N, TF = x.shape
         other_loss = []
@@ -185,10 +228,9 @@ class AICLLM(nn.Module):
         te = self.time_embedding(timestamp) 
         ne = self.node_embedding()
 
-        # ===== SPECIAL TOKENS PREPARATION (Self-RAG inspired) =====
         special_tokens_list = []
         
-        # 1. TASK TOKEN - Indicates the task type (forecast/imputation)
+        # task token
         if self.use_task_token:
             if self.task_type == 'prediction':
                 task_token = self.task_token_forecast.repeat(B, 1, 1)
@@ -196,20 +238,17 @@ class AICLLM(nn.Module):
                 task_token = self.task_token_imputation.repeat(B, 1, 1)
             special_tokens_list.append(task_token)
         
-        # 2. QUALITY TOKEN - Assesses input data reliability (ISREL inspired)
+        # quality token
         if self.use_quality_token:
-            # Calculate quality score from input data
-            x_flat = x.mean(dim=1)  # Average over nodes: (B, TF)
+            x_flat = x.mean(dim=1)  # (B, TF)
             quality_score = self.quality_scorer(x_flat)  # (B, 1)
-            # Interpolate between high and low quality tokens based on score
             quality_token = (quality_score.unsqueeze(-1) * self.quality_token_high + 
                            (1 - quality_score.unsqueeze(-1)) * self.quality_token_low)
             quality_token = quality_token.repeat(1, 1, 1)  # (B, 1, emb_dim)
             special_tokens_list.append(quality_token)
         
-        # 3. CONTEXT TOKEN - Global summary of input context
+        # context token
         if self.use_context_token:
-            # Aggregate context from all nodes
             x_context = x.mean(dim=1)  # (B, TF)
             context_embedding = self.context_aggregator(x_context)  # (B, emb_dim)
             context_token = self.context_token.repeat(B, 1, 1) + context_embedding.unsqueeze(1)
@@ -232,9 +271,8 @@ class AICLLM(nn.Module):
 
         
         if self.use_sandglassAttn and not self.wo_conloss:
-            # Only calculate consistency loss if using Attention
             if attn_weights is not None:
-                scale = attn_weights.sum(dim=1)#(B,N)
+                scale = attn_weights.sum(dim=1)    #(B,N)
 
                 sag_score = torch.einsum('bmn,bhn->bhm',self.adj_mx[None,:,:],attn_weights)
                 other_loss.append(-((sag_score*attn_weights-attn_weights*attn_weights)).sum(dim=2).mean()*10)
@@ -247,10 +285,15 @@ class AICLLM(nn.Module):
         
         sep_1 = None
         sep_2 = None
-        sep_3 = None
         if self.use_sep_token:
-            sep_1 = self.sep_token_1.repeat(B, 1, 1)
-            sep_2 = self.sep_token_2.repeat(B, 1, 1)
+            if self.use_adaptive_sep:
+                # Adaptive sep_1: between time_tokens and st_embedding (spatial)
+                sep_1 = self.compute_adaptive_sep(
+                    time_tokens, st_embedding, 
+                    self.sep_token_1, self.sep_adapter_1
+                )
+            else:
+                sep_1 = self.sep_token_1.repeat(B, 1, 1)
 
         time_tokens_idx = st_embedding.shape[1]
         
@@ -262,17 +305,32 @@ class AICLLM(nn.Module):
         if self.use_anchor_diff_token == 1:
             ad_tokens = self.anchor_diff_tokenizer(x, xa, te)
             if self.use_sep_token:
+                if self.use_adaptive_sep:
+                    # Adaptive sep_2: between anchor_diff and (time + spatial)
+                    sep_2 = self.compute_adaptive_sep(
+                        ad_tokens, st_embedding,
+                        self.sep_token_2, self.sep_adapter_2
+                    )
+                else:
+                    sep_2 = self.sep_token_2.repeat(B, 1, 1)
                 st_embedding = torch.concat((ad_tokens, sep_2, st_embedding), dim=1)
             else:
                 st_embedding = torch.concat((ad_tokens, st_embedding), dim=1)
         elif self.use_anchor_diff_token == 2:
             anchor_tokens = self.anchor_tokenizer(x_diff, te)
             if self.use_sep_token:
+                if self.use_adaptive_sep:
+                    # Adaptive sep_2: between anchor and (time + spatial)
+                    sep_2 = self.compute_adaptive_sep(
+                        anchor_tokens, st_embedding,
+                        self.sep_token_2, self.sep_adapter_2
+                    )
+                else:
+                    sep_2 = self.sep_token_2.repeat(B, 1, 1)
                 st_embedding = torch.concat((anchor_tokens, sep_2, st_embedding), dim=1)
             else:
                 st_embedding = torch.concat((anchor_tokens, st_embedding), dim=1)
         
-        # ===== PREPEND SPECIAL TOKENS (Self-RAG style) =====
         # Final sequence: [TASK] | [QUALITY] | [CONTEXT] | [ANCHOR_DIFF] | [SEP] | [TIME] | [SEP] | [SPATIAL]
         if len(special_tokens_list) > 0:
             special_tokens = torch.concat(special_tokens_list, dim=1)  # (B, num_special, emb_dim)
