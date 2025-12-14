@@ -17,5 +17,7 @@
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate stllm_test
 
+export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+
 cd /home/user03/VARDiff-test/newtest1/AIC-LLM/code/src
 bash '../scripts/pems03.sh'

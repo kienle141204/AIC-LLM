@@ -24,10 +24,17 @@ class BaseModel(nn.Module):
         raise NotImplementedError("Subclasses should implement this method.")
     
 class GPT2(BaseModel):
-    def __init__(self, lora, ln_grad, layers=None):
+    def __init__(self, lora, ln_grad, layers=None): 
         super(GPT2, self).__init__()
 
-        self.llm = Model.from_pretrained('AI-ModelScope/gpt2', trust_remote_code=True)
+        try:
+            local_model_path = '/home/user03/VARDiff-test/newtest1/AIC-LLM/gpt2'
+            self.llm = Model.from_pretrained(local_model_path, trust_remote_code=True, local_files_only=True)
+            self.tokenizer = AutoTokenizer.from_pretrained(local_model_path, trust_remote_code=True, local_files_only=True)
+        except:
+            self.llm = Model.from_pretrained('AI-ModelScope/gpt2', trust_remote_code=True)
+            self.tokenizer = AutoTokenizer.from_pretrained('AI-ModelScope/gpt2', trust_remote_code=True)
+        
         self.dim = 768
 
         if not layers is None:
@@ -49,8 +56,6 @@ class GPT2(BaseModel):
             for name, param in self.llm.named_parameters():
                 if 'ln_' in name or 'wpe' in name:
                     param.requires_grad_(True)
-        
-        self.tokenizer = AutoTokenizer.from_pretrained('AI-ModelScope/gpt2', trust_remote_code=True)
     
     def forward(self, input: torch.FloatTensor, attention_mask=None):
         output = self.llm(inputs_embeds=input, attention_mask=attention_mask, output_hidden_states=True).hidden_states[-1]
