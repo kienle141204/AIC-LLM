@@ -17,5 +17,5 @@
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate stllm_test
 
-cd /home/user03/VARDiff-test/final-test1/AIC-LLM/code/src
+cd /home/user03/VARDiff-test/newtest1/AIC-LLM/code/src
 bash '../scripts/pems03.sh'
