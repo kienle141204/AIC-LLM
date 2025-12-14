@@ -238,16 +238,16 @@ class AICLLM(nn.Module):
         time_tokens_idx = st_embedding.shape[1]
         st_embedding = torch.concat((time_tokens, st_embedding), dim=1)
 
+        if self.use_sep2_token:
+            sep2_token = self.sep2_token.repeat(B, 1, 1)
+            st_embedding = torch.concat((sep2_token, st_embedding), dim=1)  
+
         if self.use_anchor_diff_token == 1:
             ad_tokens = self.anchor_diff_tokenizer(x, xa, te)
             st_embedding = torch.concat((ad_tokens, st_embedding), dim=1)
         elif self.use_anchor_diff_token == 2:
             anchor_tokens = self.anchor_tokenizer(x_diff, te)
             st_embedding = torch.concat((anchor_tokens, st_embedding), dim=1)
-
-        if self.use_sep2_token:
-            sep2_token = self.sep2_token.repeat(B, 1, 1)
-            st_embedding = torch.concat((sep2_token, st_embedding), dim=1)  
         
         # Final sequence: [TASK] | [QUALITY] | [CONTEXT] | [SEP] | [ANCHOR] | [TIME] | [SPATIAL]
         sep = None
