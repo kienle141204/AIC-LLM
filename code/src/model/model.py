@@ -69,36 +69,14 @@ class AICLLM(nn.Module):
         self.setadj(adj_mx,dis_mx)
         
         # separator token
-        self.sep_token = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
-        nn.init.normal_(self.sep_token, std=0.02)
         if self.use_sep_token:
-            # Base separator tokens
-            self.sep_token_1 = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
-            nn.init.normal_(self.sep_token_1, std=0.02)
-            self.sep_token_2 = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
-            nn.init.normal_(self.sep_token_2, std=0.02)
-            
-            # Adaptive separator - learns from both sides
-            if self.use_adaptive_sep:
-                self.sep_adapter_1 = nn.Sequential(
-                    nn.Linear(self.emb_dim * 2, self.emb_dim),
-                    nn.GELU(),
-                    nn.Linear(self.emb_dim, self.emb_dim),
-                    nn.LayerNorm(self.emb_dim)
-                )
-                self.sep_adapter_2 = nn.Sequential(
-                    nn.Linear(self.emb_dim * 2, self.emb_dim),
-                    nn.GELU(),
-                    nn.Linear(self.emb_dim, self.emb_dim),
-                    nn.LayerNorm(self.emb_dim)
-                )
+            self.sep_token = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
+            nn.init.normal_(self.sep_token, std=0.02)
         
         # task token
         if self.use_task_token:
             self.task_token_forecast = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
             nn.init.normal_(self.task_token_forecast, std=0.02)
-            # self.task_token_imputation = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
-            # nn.init.normal_(self.task_token_imputation, std=0.02)
         
         # context token
         if self.use_context_token:
@@ -267,54 +245,22 @@ class AICLLM(nn.Module):
         
         # Time Tokenizer
         time_tokens = self.time_tokenizer(x, te)
-        
-        sep_1 = None
-        sep_2 = None
-        if self.use_sep_token:
-            if self.use_adaptive_sep:
-                sep_1 = self.compute_adaptive_sep(
-                    time_tokens, st_embedding, 
-                    self.sep_token_1, self.sep_adapter_1
-                )
-            else:
-                sep_1 = self.sep_token_1.repeat(B, 1, 1)
-
         time_tokens_idx = st_embedding.shape[1]
-        
-        if self.use_sep_token:
-            st_embedding = torch.concat((time_tokens, sep_1, st_embedding), dim=1)  
-        else:
-            st_embedding = torch.concat((time_tokens, st_embedding), dim=1)
+        st_embedding = torch.concat((time_tokens, st_embedding), dim=1)
 
         if self.use_anchor_diff_token == 1:
             ad_tokens = self.anchor_diff_tokenizer(x, xa, te)
-            if self.use_sep_token:
-                if self.use_adaptive_sep:
-                    sep_2 = self.compute_adaptive_sep(
-                        ad_tokens, st_embedding,
-                        self.sep_token_2, self.sep_adapter_2
-                    )
-                else:
-                    sep_2 = self.sep_token_2.repeat(B, 1, 1)
-                st_embedding = torch.concat((ad_tokens, sep_2, st_embedding), dim=1)
-            else:
-                st_embedding = torch.concat((ad_tokens, st_embedding), dim=1)
+            st_embedding = torch.concat((ad_tokens, st_embedding), dim=1)
         elif self.use_anchor_diff_token == 2:
             anchor_tokens = self.anchor_tokenizer(x_diff, te)
-            if self.use_sep_token:
-                if self.use_adaptive_sep:
-                    sep_2 = self.compute_adaptive_sep(
-                        anchor_tokens, st_embedding,
-                        self.sep_token_2, self.sep_adapter_2
-                    )
-                else:
-                    sep_2 = self.sep_token_2.repeat(B, 1, 1)
-                st_embedding = torch.concat((anchor_tokens, sep_2, st_embedding), dim=1)
-            else:
-                st_embedding = torch.concat((anchor_tokens, st_embedding), dim=1)
+            st_embedding = torch.concat((anchor_tokens, st_embedding), dim=1)
         
-        # Final sequence: [TASK] | [QUALITY] | [CONTEXT] | [ANCHOR] | [SEP] | [TIME] | [SEP] | [SPATIAL]
-        st_embedding = torch.concat((self.sep_token, st_embedding), dim=1)
+        # Final sequence: [TASK] | [QUALITY] | [CONTEXT] | [SEP] | [ANCHOR] | [TIME] | [SPATIAL]
+        sep = None
+        if self.use_sep_token:
+            sep = self.sep_token.repeat(B, 1, 1)
+            st_embedding = torch.concat((sep, st_embedding), dim=1)
+        
         if len(special_tokens_list) > 0:
             special_tokens = torch.concat(special_tokens_list, dim=1)  # (B, num_special, emb_dim)
             st_embedding = torch.concat([special_tokens, st_embedding], dim=1)
@@ -323,10 +269,7 @@ class AICLLM(nn.Module):
             prompt_len,_ = prompt_prefix.shape
             prompt_embedding = self.basemodel.getembedding(prompt_prefix).view(1,prompt_len,-1)
             prompt_embedding = prompt_embedding.repeat(B,1,1)
-            if self.use_sep_token:
-                st_embedding = torch.concat([prompt_embedding, sep_1, st_embedding],dim=1)
-            else:
-                st_embedding = torch.concat([prompt_embedding, st_embedding],dim=1)
+            st_embedding = torch.concat([prompt_embedding, st_embedding],dim=1)
         
         hidden_state = st_embedding
 
@@ -344,11 +287,7 @@ class AICLLM(nn.Module):
             s_state = s_state[:,self.node_order_rev,:]
 
         if self.use_time_token:
-            if self.use_sep_token:
-                t_state = hidden_state[:,-time_tokens_idx-2:-time_tokens_idx-1,:]
-            else:
-                t_state = hidden_state[:,-time_tokens_idx-1:-time_tokens_idx,:]
-                
+            t_state = hidden_state[:,-time_tokens_idx-1:-time_tokens_idx,:]
             t_state += time_tokens[:,-1:,:]
             s_state += t_state
 

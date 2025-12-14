@@ -40,10 +40,9 @@ def AddModelArgs(parser):
     parser.add_argument("--use_sep_token", action="store_true")
     parser.add_argument("--use_adaptive_sep", action="store_true", help="Enable adaptive separator that learns from both sides")
     
-    # Self-RAG inspired special tokens
-    parser.add_argument("--use_task_token", action="store_true", help="Enable task type token (forecast/imputation)")
+    parser.add_argument("--use_task_token", action="store_true", help="Enable task type token")
     parser.add_argument("--use_context_token", action="store_true", help="Enable global context summary token")
-    parser.add_argument("--use_quality_token", action="store_true", help="Enable input quality assessment token (ISREL inspired)")
+    parser.add_argument("--use_quality_token", action="store_true", help="Enable input quality assessment token")
 
 
 
