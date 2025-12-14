@@ -69,6 +69,8 @@ class AICLLM(nn.Module):
         self.setadj(adj_mx,dis_mx)
         
         # separator token
+        self.sep_token = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
+        nn.init.normal_(self.sep_token, std=0.02)
         if self.use_sep_token:
             # Base separator tokens
             self.sep_token_1 = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
@@ -110,19 +112,17 @@ class AICLLM(nn.Module):
                 nn.LayerNorm(self.emb_dim)
             )
         
-        # quality token
+        # quality token (based on diff with anchor)
         if self.use_quality_token:
             self.quality_token_high = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
             nn.init.normal_(self.quality_token_high, std=0.02)
             self.quality_token_low = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
             nn.init.normal_(self.quality_token_low, std=0.02)
+            # Input: diff features (mean_diff per sample)
             self.quality_scorer = nn.Sequential(
-                nn.Linear(sample_len * input_dim, 128),
+                nn.Linear(1, 16),
                 nn.ReLU(),
-                nn.Dropout(dropout),
-                nn.Linear(128, 32),
-                nn.ReLU(),
-                nn.Linear(32, 1),
+                nn.Linear(16, 1),
                 nn.Sigmoid()
             )
         
@@ -185,28 +185,13 @@ class AICLLM(nn.Module):
         self.layer_norm = nn.LayerNorm(self.emb_dim)
     
     def compute_adaptive_sep(self, left_tokens, right_tokens, sep_base, sep_adapter):
-        """
-        Compute adaptive separator token based on both sides.
-        
-        Args:
-            left_tokens: Tokens on the left side (B, L, D)
-            right_tokens: Tokens on the right side (B, R, D)
-            sep_base: Base separator token parameter
-            sep_adapter: Adapter network for this separator
-        
-        Returns:
-            Adaptive separator token (B, 1, D)
-        """
         B = left_tokens.shape[0]
         
-        # Get summary of both sides
         left_summary = left_tokens.mean(dim=1)   # (B, D)
         right_summary = right_tokens.mean(dim=1) # (B, D)
         
-        # Combine information from both sides
         combined = torch.cat([left_summary, right_summary], dim=-1)  # (B, 2D)
         
-        # Generate adaptive component
         adaptive = sep_adapter(combined)  # (B, D)
         
         # Final sep = base + adaptive
@@ -232,16 +217,16 @@ class AICLLM(nn.Module):
         
         # task token
         if self.use_task_token:
-            if self.task_type == 'prediction':
-                task_token = self.task_token_forecast.repeat(B, 1, 1)
-            else:  # imputation
-                task_token = self.task_token_imputation.repeat(B, 1, 1)
+            task_token = self.task_token_forecast.repeat(B, 1, 1)
             special_tokens_list.append(task_token)
         
-        # quality token
+        # quality token (based on diff with anchor)
         if self.use_quality_token:
-            x_flat = x.mean(dim=1)  # (B, TF)
-            quality_score = self.quality_scorer(x_flat)  # (B, 1)
+            diff = (x - xa).abs().mean(dim=(1, 2), keepdim=True)  # (B, 1, 1)
+            diff = diff.squeeze(-1)  # (B, 1)
+            
+            quality_score = self.quality_scorer(diff)  # (B, 1)
+            
             quality_token = (quality_score.unsqueeze(-1) * self.quality_token_high + 
                            (1 - quality_score.unsqueeze(-1)) * self.quality_token_low)
             quality_token = quality_token.repeat(1, 1, 1)  # (B, 1, emb_dim)
@@ -287,7 +272,6 @@ class AICLLM(nn.Module):
         sep_2 = None
         if self.use_sep_token:
             if self.use_adaptive_sep:
-                # Adaptive sep_1: between time_tokens and st_embedding (spatial)
                 sep_1 = self.compute_adaptive_sep(
                     time_tokens, st_embedding, 
                     self.sep_token_1, self.sep_adapter_1
@@ -306,7 +290,6 @@ class AICLLM(nn.Module):
             ad_tokens = self.anchor_diff_tokenizer(x, xa, te)
             if self.use_sep_token:
                 if self.use_adaptive_sep:
-                    # Adaptive sep_2: between anchor_diff and (time + spatial)
                     sep_2 = self.compute_adaptive_sep(
                         ad_tokens, st_embedding,
                         self.sep_token_2, self.sep_adapter_2
@@ -320,7 +303,6 @@ class AICLLM(nn.Module):
             anchor_tokens = self.anchor_tokenizer(x_diff, te)
             if self.use_sep_token:
                 if self.use_adaptive_sep:
-                    # Adaptive sep_2: between anchor and (time + spatial)
                     sep_2 = self.compute_adaptive_sep(
                         anchor_tokens, st_embedding,
                         self.sep_token_2, self.sep_adapter_2
@@ -331,7 +313,8 @@ class AICLLM(nn.Module):
             else:
                 st_embedding = torch.concat((anchor_tokens, st_embedding), dim=1)
         
-        # Final sequence: [TASK] | [QUALITY] | [CONTEXT] | [ANCHOR_DIFF] | [SEP] | [TIME] | [SEP] | [SPATIAL]
+        # Final sequence: [TASK] | [QUALITY] | [CONTEXT] | [ANCHOR] | [SEP] | [TIME] | [SEP] | [SPATIAL]
+        st_embedding = torch.concat((self.sep_token, st_embedding), dim=1)
         if len(special_tokens_list) > 0:
             special_tokens = torch.concat(special_tokens_list, dim=1)  # (B, num_special, emb_dim)
             st_embedding = torch.concat([special_tokens, st_embedding], dim=1)
@@ -362,7 +345,6 @@ class AICLLM(nn.Module):
 
         if self.use_time_token:
             if self.use_sep_token:
-                # Shifted by 1 due to sep token between Time and Spatial
                 t_state = hidden_state[:,-time_tokens_idx-2:-time_tokens_idx-1,:]
             else:
                 t_state = hidden_state[:,-time_tokens_idx-1:-time_tokens_idx,:]
