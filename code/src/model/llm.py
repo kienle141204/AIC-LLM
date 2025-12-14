@@ -1,8 +1,7 @@
 import torch 
 from torch import nn
-from modelscope.models import Model
-from swift import LoRAConfig, Swift
-from modelscope import AutoTokenizer 
+from transformers import GPT2Model, GPT2Tokenizer
+from swift import LoRAConfig, Swift 
 
 class BaseModel(nn.Module):
     def __init__(self):
@@ -28,15 +27,19 @@ class GPT2(BaseModel):
         super(GPT2, self).__init__()
 
         try:
+            print("Loading local model")
             local_model_path = '/home/user03/VARDiff-test/newtest1/AIC-LLM/gpt2'
-            self.llm = Model.from_pretrained(local_model_path, trust_remote_code=True, local_files_only=True)
-            self.tokenizer = AutoTokenizer.from_pretrained(local_model_path, trust_remote_code=True, local_files_only=True)
-        except:
-            self.llm = Model.from_pretrained('AI-ModelScope/gpt2', trust_remote_code=True)
-            self.tokenizer = AutoTokenizer.from_pretrained('AI-ModelScope/gpt2', trust_remote_code=True)
+            self.llm = GPT2Model.from_pretrained(local_model_path, local_files_only=True)
+            self.tokenizer = GPT2Tokenizer.from_pretrained(local_model_path, local_files_only=True)
+            print("Successfully loaded local model")
+        except Exception as e:
+            print(f"Failed to load local model: {e}")
+            print("Loading remote model")
+            self.llm = GPT2Model.from_pretrained('gpt2')
+            self.tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
         
         self.dim = 768
-
+    
         if not layers is None:
             self.llm.transformer.h = self.llm.transformer.h[:layers]
         
