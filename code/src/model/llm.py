@@ -29,7 +29,7 @@ class GPT2(BaseModel):
 
         try:
             print("Loading local model")
-            local_model_path = '/home/user03/VARDiff-test/newtest1/AIC-LLM/gpt2_modelscope'
+            local_model_path = '/home/user03/VARDiff-test/newtest1/AIC-LLM/gpt2_modelscope/AI-ModelScope/gpt2'
             self.llm = Model.from_pretrained(local_model_path, trust_remote_code=True, local_files_only=True)
             self.tokenizer = AutoTokenizer.from_pretrained(local_model_path, trust_remote_code=True, local_files_only=True)
         except:
