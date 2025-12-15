@@ -34,7 +34,7 @@ class AICLLM(nn.Module):
                  use_anchor_diff_token: int = 0,
                  use_diff: int = 0,
                  use_sep_token: bool = True,
-                 use_adaptive_sep: bool = False,
+                 use_sep2_token: bool = True,
                  use_task_token: bool = True,
                  use_context_token: bool = True,
                  use_quality_token: bool = True,
@@ -56,7 +56,7 @@ class AICLLM(nn.Module):
         self.dis_mx = dis_mx
         self.use_diff = use_diff 
         self.use_sep_token = use_sep_token
-        self.use_adaptive_sep = use_adaptive_sep
+        self.use_sep2_token = use_sep2_token
         self.use_task_token = use_task_token
         self.use_context_token = use_context_token
         self.use_quality_token = use_quality_token
@@ -72,6 +72,11 @@ class AICLLM(nn.Module):
         if self.use_sep_token:
             self.sep_token = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
             nn.init.normal_(self.sep_token, std=0.02)
+        
+        # separator2 token
+        if self.use_sep2_token:
+            self.sep2_token = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
+            nn.init.normal_(self.sep2_token, std=0.02)
         
         # task token
         if self.use_task_token:
@@ -162,21 +167,6 @@ class AICLLM(nn.Module):
 
         self.layer_norm = nn.LayerNorm(self.emb_dim)
     
-    def compute_adaptive_sep(self, left_tokens, right_tokens, sep_base, sep_adapter):
-        B = left_tokens.shape[0]
-        
-        left_summary = left_tokens.mean(dim=1)   # (B, D)
-        right_summary = right_tokens.mean(dim=1) # (B, D)
-        
-        combined = torch.cat([left_summary, right_summary], dim=-1)  # (B, 2D)
-        
-        adaptive = sep_adapter(combined)  # (B, D)
-        
-        # Final sep = base + adaptive
-        sep = sep_base.repeat(B, 1, 1) + adaptive.unsqueeze(1)  # (B, 1, D)
-        
-        return sep
-    
     def forward(self, x: torch.FloatTensor, xa: torch.FloatTensor, timestamp: torch.Tensor, prompt_prefix: Optional[torch.Tensor]):
         B, N, TF = x.shape
         other_loss = []
@@ -247,6 +237,10 @@ class AICLLM(nn.Module):
         time_tokens = self.time_tokenizer(x, te)
         time_tokens_idx = st_embedding.shape[1]
         st_embedding = torch.concat((time_tokens, st_embedding), dim=1)
+
+        if self.use_sep2_token:
+            sep2_token = self.sep2_token.repeat(B, 1, 1)
+            st_embedding = torch.concat((sep2_token, st_embedding), dim=1)  
 
         if self.use_anchor_diff_token == 1:
             ad_tokens = self.anchor_diff_tokenizer(x, xa, te)

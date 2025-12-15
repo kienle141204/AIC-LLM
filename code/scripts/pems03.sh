@@ -37,7 +37,8 @@ python main.py \
     --use_task_token \
     --use_context_token \
     --use_quality_token \
-    --use_sep_token
+    --use_sep_token \
+    --use_sep2_token
 
 # python main.py \
 #     --data_path '../../data/traffic/PEMS03/PEMS03.npz' \
