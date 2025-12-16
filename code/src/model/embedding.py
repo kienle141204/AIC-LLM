@@ -17,7 +17,8 @@ class TimeEmbedding(nn.Module):
         minute = (TE[..., 4].to(torch.long) % 60).view(B * T, -1)
 
         WE = self.week_embedding(week).view(B, T, -1)
-        DE = self.day_embedding((hour*60 + minute)//5).view(B, T, -1)
+        day_index = ((hour * 60 + minute) // 5).clamp(0, 287)  # Đảm bảo index trong phạm vi [0, 287]
+        DE = self.day_embedding(day_index).view(B, T, -1)
 
         TE = torch.cat([WE, DE], dim=-1).view(B, T, -1)
         return TE
