@@ -67,7 +67,13 @@ class AICLLM(nn.Module):
         self.emb_dim = basemodel.dim
         tim_dim = t_dim*2     #day, week
         self.setadj(adj_mx,dis_mx)
-        
+
+        # segment embedding
+        self.segment_embeddings = nn.Embedding(
+            num_embeddings=4,
+            embedding_dim=self.emb_dim
+        )
+
         # separator token
         if self.use_sep_token:
             self.sep_token = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
@@ -212,7 +218,7 @@ class AICLLM(nn.Module):
         if self.topological_sort_node:
             spatial_tokens = spatial_tokens[:, self.node_order, :]
         
-        st_embedding = spatial_tokens
+        # st_embedding = spatial_tokens
         s_num = N
         s_num = self.sag_tokens
         
@@ -236,7 +242,7 @@ class AICLLM(nn.Module):
         # Time Tokenizer
         time_tokens = self.time_tokenizer(x, te)
         time_tokens_idx = st_embedding.shape[1]
-        st_embedding = torch.concat((time_tokens, st_embedding), dim=1)
+        # st_embedding = torch.concat((time_tokens, st_embedding), dim=1)
 
         if self.use_sep2_token:
             sep2_token = self.sep2_token.repeat(B, 1, 1)
@@ -244,10 +250,10 @@ class AICLLM(nn.Module):
 
         if self.use_anchor_diff_token == 1:
             ad_tokens = self.anchor_diff_tokenizer(x, xa, te)
-            st_embedding = torch.concat((ad_tokens, st_embedding), dim=1)
+            # st_embedding = torch.concat((ad_tokens, st_embedding), dim=1)
         elif self.use_anchor_diff_token == 2:
             anchor_tokens = self.anchor_tokenizer(x_diff, te)
-            st_embedding = torch.concat((anchor_tokens, st_embedding), dim=1)
+            # st_embedding = torch.concat((anchor_tokens, st_embedding), dim=1)
         
         # Final sequence: [TASK] | [QUALITY] | [CONTEXT] | [SEP] | [ANCHOR] | [TIME] | [SPATIAL]
         sep = None
@@ -257,13 +263,39 @@ class AICLLM(nn.Module):
         
         if len(special_tokens_list) > 0:
             special_tokens = torch.concat(special_tokens_list, dim=1)  # (B, num_special, emb_dim)
-            st_embedding = torch.concat([special_tokens, st_embedding], dim=1)
+            # st_embedding = torch.concat([special_tokens, st_embedding], dim=1)
         
-        if prompt_prefix is not None:
-            prompt_len,_ = prompt_prefix.shape
-            prompt_embedding = self.basemodel.getembedding(prompt_prefix).view(1,prompt_len,-1)
-            prompt_embedding = prompt_embedding.repeat(B,1,1)
-            st_embedding = torch.concat([prompt_embedding, st_embedding],dim=1)
+        num_special = special_tokens.shape[1] if special_tokens is not None else 0
+        num_anchor = anchor_tokens.shape[1] if anchor_tokens is not None else 0
+        num_time = time_tokens.shape[1] if time_tokens is not None else 0
+        num_spatial = spatial_tokens.shape[1] if spatial_tokens is not None else 0
+
+        segments_ids_list = []
+
+        if num_special > 0:
+            segments_ids_list.append(torch.full((B, num_special), 0, dtype=torch.long, device=x.device))
+        if num_anchor > 0:
+            segments_ids_list.append(torch.full((B, num_anchor), 1, dtype=torch.long, device=x.device))
+        if num_time > 0:
+            segments_ids_list.append(torch.full((B, num_time), 2, dtype=torch.long, device=x.device))
+        if num_spatial > 0:
+            segments_ids_list.append(torch.full((B, num_spatial), 3, dtype=torch.long, device=x.device))
+
+        segments_ids = torch.concat(segments_ids_list, dim=1)   
+
+        segment_emb = self.segment_embeddings(segment_ids)
+
+        tokens_list = []
+        if special_tokens is not None:
+            tokens_list.append(special_tokens)
+        if anchor_tokens is not None:
+            tokens_list.append(anchor_tokens)
+        tokens_list.append(time_tokens)
+        tokens_list.append(st_embedding)
+        
+        st_embedding = torch.cat(tokens_list, dim=1)  # (B, total_seq_len, emb_dim)
+        
+        st_embedding = st_embedding + segment_emb
         
         hidden_state = st_embedding
 
