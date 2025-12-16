@@ -224,9 +224,9 @@ class AICLLM(nn.Module):
         
         # Precoder
         if self.use_sandglassAttn:
-            st_embedding, attn_weights = self.sag.encode(st_embedding)
+            spatial_tokens, attn_weights = self.sag.encode(spatial_tokens)
         else:
-            st_embedding, attn_weights = self.precoder(st_embedding)
+            spatial_tokens, attn_weights = self.precoder(spatial_tokens)    
 
         
         if self.use_sandglassAttn and not self.wo_conloss:
