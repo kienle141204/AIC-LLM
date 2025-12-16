@@ -222,11 +222,14 @@ class AICLLM(nn.Module):
         s_num = N
         s_num = self.sag_tokens
         
+        # Lưu spatial_tokens gốc trước khi encode cho decoder
+        spatial_tokens_raw = spatial_tokens
+        
         # Precoder
         if self.use_sandglassAttn:
-            spatial_tokens, attn_weights = self.sag.encode(spatial_tokens)
+            spatial_tokens_encoded, attn_weights = self.sag.encode(spatial_tokens)
         else:
-            spatial_tokens, attn_weights = self.precoder(spatial_tokens)    
+            spatial_tokens_encoded, attn_weights = self.precoder(spatial_tokens)    
 
         
         if self.use_sandglassAttn and not self.wo_conloss:
@@ -263,7 +266,7 @@ class AICLLM(nn.Module):
         num_special = special_tokens.shape[1] if special_tokens is not None else 0
         num_anchor = anchor_tokens.shape[1] if anchor_tokens is not None else 0
         num_time = time_tokens.shape[1] if time_tokens is not None else 0
-        num_spatial = spatial_tokens.shape[1] if spatial_tokens is not None else 0
+        num_spatial = spatial_tokens_encoded.shape[1] if spatial_tokens_encoded is not None else 0
 
         segments_ids_list = []
 
@@ -276,9 +279,11 @@ class AICLLM(nn.Module):
         if num_spatial > 0:
             segments_ids_list.append(torch.full((B, num_spatial), 3, dtype=torch.long, device=x.device))
 
-        segments_ids = torch.concat(segments_ids_list, dim=1)   
-
-        segment_emb = self.segment_embeddings(segments_ids)
+        if len(segments_ids_list) > 0:
+            segments_ids = torch.concat(segments_ids_list, dim=1)
+            segment_emb = self.segment_embeddings(segments_ids)
+        else:
+            segment_emb = None
 
         tokens_list = []
         if special_tokens is not None:
@@ -286,11 +291,12 @@ class AICLLM(nn.Module):
         if anchor_tokens is not None:
             tokens_list.append(anchor_tokens)
         tokens_list.append(time_tokens)
-        tokens_list.append(spatial_tokens)  # Thay st_embedding bằng spatial_tokens
+        tokens_list.append(spatial_tokens_encoded)  # Dùng encoded version
         
         st_embedding = torch.cat(tokens_list, dim=1)  # (B, total_seq_len, emb_dim)
         
-        st_embedding = st_embedding + segment_emb
+        if segment_emb is not None:
+            st_embedding = st_embedding + segment_emb
         
         hidden_state = st_embedding
 
@@ -299,10 +305,10 @@ class AICLLM(nn.Module):
 
         # Decoder
         if self.use_sandglassAttn:
-            s_state = self.sag.decode(s_state, spatial_tokens)
+            s_state = self.sag.decode(s_state, spatial_tokens_raw)
         else:
-            s_state = self.decoder(s_state, spatial_tokens)  
-        s_state += spatial_tokens
+            s_state = self.decoder(s_state, spatial_tokens_raw)  
+        s_state += spatial_tokens_raw
 
         if self.topological_sort_node:
             s_state = s_state[:,self.node_order_rev,:]
