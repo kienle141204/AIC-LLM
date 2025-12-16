@@ -67,6 +67,10 @@ class AICLLM(nn.Module):
         self.emb_dim = basemodel.dim
         tim_dim = t_dim*2     #day, week
         self.setadj(adj_mx,dis_mx)
+
+        # position encoding 
+        self.segment_pe = nn.Parameter(torch.zeros(4, 1, self.emb_dim))  # 4 segments
+        nn.init.normal_(self.segment_pe, std=0.02)
         
         # separator token
         if self.use_sep_token:
@@ -211,6 +215,7 @@ class AICLLM(nn.Module):
         spatial_tokens = self.node_tokenizer(x_spatial, te, ne)  # (B, N, emb_dim)
         if self.topological_sort_node:
             spatial_tokens = spatial_tokens[:, self.node_order, :]
+            spatial_tokens = spatial_tokens + self.segment_pe[3]
         
         st_embedding = spatial_tokens
         s_num = N
@@ -235,6 +240,7 @@ class AICLLM(nn.Module):
         
         # Time Tokenizer
         time_tokens = self.time_tokenizer(x, te)
+        time_tokens = time_tokens + self.segment_pe[2]
         time_tokens_idx = st_embedding.shape[1]
         st_embedding = torch.concat((time_tokens, st_embedding), dim=1)
 
@@ -244,9 +250,11 @@ class AICLLM(nn.Module):
 
         if self.use_anchor_diff_token == 1:
             ad_tokens = self.anchor_diff_tokenizer(x, xa, te)
+            ad_tokens = ad_tokens + self.segment_pe[1]
             st_embedding = torch.concat((ad_tokens, st_embedding), dim=1)
         elif self.use_anchor_diff_token == 2:
             anchor_tokens = self.anchor_tokenizer(x_diff, te)
+            anchor_tokens = anchor_tokens + self.segment_pe[1]
             st_embedding = torch.concat((anchor_tokens, st_embedding), dim=1)
         
         # Final sequence: [TASK] | [QUALITY] | [CONTEXT] | [SEP] | [ANCHOR] | [TIME] | [SPATIAL]
@@ -257,6 +265,7 @@ class AICLLM(nn.Module):
         
         if len(special_tokens_list) > 0:
             special_tokens = torch.concat(special_tokens_list, dim=1)  # (B, num_special, emb_dim)
+            special_tokens = special_tokens + self.segment_pe[0]
             st_embedding = torch.concat([special_tokens, st_embedding], dim=1)
         
         if prompt_prefix is not None:
