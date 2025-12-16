@@ -241,29 +241,24 @@ class AICLLM(nn.Module):
         
         # Time Tokenizer
         time_tokens = self.time_tokenizer(x, te)
-        time_tokens_idx = st_embedding.shape[1]
+        time_tokens_idx = spatial_tokens.shape[1]
         # st_embedding = torch.concat((time_tokens, st_embedding), dim=1)
 
+        # Khởi tạo các biến trước
+        anchor_tokens = None
+        special_tokens = None
+        
         if self.use_sep2_token:
             sep2_token = self.sep2_token.repeat(B, 1, 1)
-            st_embedding = torch.concat((sep2_token, st_embedding), dim=1)  
 
         if self.use_anchor_diff_token == 1:
-            ad_tokens = self.anchor_diff_tokenizer(x, xa, te)
-            # st_embedding = torch.concat((ad_tokens, st_embedding), dim=1)
+            anchor_tokens = self.anchor_diff_tokenizer(x, xa, te)
         elif self.use_anchor_diff_token == 2:
             anchor_tokens = self.anchor_tokenizer(x_diff, te)
-            # st_embedding = torch.concat((anchor_tokens, st_embedding), dim=1)
         
-        # Final sequence: [TASK] | [QUALITY] | [CONTEXT] | [SEP] | [ANCHOR] | [TIME] | [SPATIAL]
-        sep = None
-        if self.use_sep_token:
-            sep = self.sep_token.repeat(B, 1, 1)
-            st_embedding = torch.concat((sep, st_embedding), dim=1)
-        
+        # Final sequence: [SPECIAL] | [ANCHOR] | [TIME] | [SPATIAL]
         if len(special_tokens_list) > 0:
             special_tokens = torch.concat(special_tokens_list, dim=1)  # (B, num_special, emb_dim)
-            # st_embedding = torch.concat([special_tokens, st_embedding], dim=1)
         
         num_special = special_tokens.shape[1] if special_tokens is not None else 0
         num_anchor = anchor_tokens.shape[1] if anchor_tokens is not None else 0
@@ -283,7 +278,7 @@ class AICLLM(nn.Module):
 
         segments_ids = torch.concat(segments_ids_list, dim=1)   
 
-        segment_emb = self.segment_embeddings(segment_ids)
+        segment_emb = self.segment_embeddings(segments_ids)
 
         tokens_list = []
         if special_tokens is not None:
@@ -291,7 +286,7 @@ class AICLLM(nn.Module):
         if anchor_tokens is not None:
             tokens_list.append(anchor_tokens)
         tokens_list.append(time_tokens)
-        tokens_list.append(st_embedding)
+        tokens_list.append(spatial_tokens)  # Thay st_embedding bằng spatial_tokens
         
         st_embedding = torch.cat(tokens_list, dim=1)  # (B, total_seq_len, emb_dim)
         
