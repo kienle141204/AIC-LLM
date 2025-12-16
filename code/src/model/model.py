@@ -244,7 +244,7 @@ class AICLLM(nn.Module):
         
         # Time Tokenizer
         time_tokens = self.time_tokenizer(x, te)
-        time_tokens_idx = spatial_tokens.shape[1]
+        time_tokens_idx = spatial_tokens_encoded.shape[1]
         # st_embedding = torch.concat((time_tokens, st_embedding), dim=1)
 
         # Khởi tạo các biến trước
