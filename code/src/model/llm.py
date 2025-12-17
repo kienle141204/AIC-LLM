@@ -38,18 +38,28 @@ class GPT2(BaseModel):
             self.tokenizer = AutoTokenizer.from_pretrained('AI-ModelScope/gpt2', trust_remote_code=True)
         
         self.dim = 768
-
-        if not layers is None:
-            self.llm.transformer.h = self.llm.transformer.h[:layers]
+        
+        total_layers = len(self.llm.transformer.h)
+        # if not layers is None:
+        #     self.llm.transformer.h = self.llm.transformer.h[:layers]
         
         for name, param in self.llm.named_parameters():
             param.requires_grad_(False)
         
         if lora:
+            start_layer = total_layers - layers
+            target_modules = []
+            for i in range(start_layer, total_layers):
+                target_modules.extend([
+                    f'transformer.h.{i}.attn.q_attn',
+                    f'transformer.h.{i}.attn.c_attn',
+                    f'transformer.h.{i}.mlp.c_fc',
+                    f'transformer.h.{i}.mlp.c_proj',
+                ])
             lora_config = LoRAConfig(
                 r=16,
                 lora_alpha=32,
-                target_modules=['q_attn','c_attn', 'c_fc', 'c_proj'],
+                target_modules=target_modules,
                 lora_dropout=0.,
             )
             self.llm = Swift.prepare_model(self.llm, lora_config,trust_remote_code=True).model
