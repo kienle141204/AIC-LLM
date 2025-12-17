@@ -49,7 +49,7 @@ class GPT2(BaseModel):
             lora_config = LoRAConfig(
                 r=16,
                 lora_alpha=32,
-                target_modules=['q_attn','c_attn'],
+                target_modules=['q_attn','c_attn', 'c_fc', 'c_proj'],
                 lora_dropout=0.,
             )
             self.llm = Swift.prepare_model(self.llm, lora_config,trust_remote_code=True).model
