@@ -3,7 +3,7 @@ python main.py \
     --data_path '../../data/traffic/PEMS08/PEMS08.npz' \
     --adj_filename ../../data/traffic/PEMS08/PEMS08.csv \
     --dataset PEMS08FLOW \
-    --desc xa_PEMS08_pre\ \
+    --desc seg_emb_PEMS08_pre\
     --sample_len 12 \
     --predict_len 12 \
     --train_ratio 0.6 \

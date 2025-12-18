@@ -3,7 +3,7 @@ python main.py \
     --data_path '../../data/traffic/PEMS04/PEMS04.npz' \
     --adj_filename ../../data/traffic/PEMS04/PEMS04.csv \
     --dataset PEMS04FLOW \
-    --desc use_anchor_PEMS04_pre\
+    --desc seg_emb_PEMS04_pre\
     --sample_len 12 \
     --predict_len 12 \
     --train_ratio 0.6 \
