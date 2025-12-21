@@ -39,6 +39,7 @@ def AddModelArgs(parser):
     parser.add_argument("--use_diff", default=0, type=int, help="use_diff=1")
     parser.add_argument("--use_sep_token", action="store_true")
     parser.add_argument("--use_sep2_token", action="store_true")
+    parser.add_argument("--use_sep3_token", action="store_true")    
     parser.add_argument("--use_task_token", action="store_true", help="Enable task type token")
     parser.add_argument("--use_context_token", action="store_true", help="Enable global context summary token")
     parser.add_argument("--use_quality_token", action="store_true", help="Enable input quality assessment token")

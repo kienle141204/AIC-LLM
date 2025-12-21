@@ -261,7 +261,7 @@ if __name__ == '__main__':
                      adj_mx = adj_mx, dis_mx = distance_mx, \
                     use_node_embedding = args.node_embedding ,use_time_token= args.time_token, \
                     use_anchor_diff_token = args.use_anchor_diff_token, use_diff = args.use_diff, \
-                    use_sep_token = args.use_sep_token, use_sep2_token = args.use_sep2_token, \
+                    use_sep_token = args.use_sep_token, use_sep2_token = args.use_sep2_token, use_sep3_token = args.use_sep3_token, \
                     use_task_token = args.use_task_token, use_context_token = args.use_context_token, use_quality_token = args.use_quality_token, \
                     task_type = args.task, \
                     use_sandglassAttn = args.sandglassAttn, dropout = args.dropout, trunc_k = args.trunc_k, t_dim = args.t_dim,wo_conloss=args.wo_conloss).cuda()

@@ -35,6 +35,7 @@ class AICLLM(nn.Module):
                  use_diff: int = 0,
                  use_sep_token: bool = True,
                  use_sep2_token: bool = True,
+                 use_sep3_token: bool = True,
                  use_task_token: bool = True,
                  use_context_token: bool = True,
                  use_quality_token: bool = True,
@@ -57,6 +58,7 @@ class AICLLM(nn.Module):
         self.use_diff = use_diff 
         self.use_sep_token = use_sep_token
         self.use_sep2_token = use_sep2_token
+        self.use_sep3_token = use_sep3_token
         self.use_task_token = use_task_token
         self.use_context_token = use_context_token
         self.use_quality_token = use_quality_token
@@ -77,6 +79,12 @@ class AICLLM(nn.Module):
         if self.use_sep2_token:
             self.sep2_token = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
             nn.init.normal_(self.sep2_token, std=0.02)
+        
+        # separator3 token (between spatial and temporal)
+        if self.use_sep3_token:
+            self.sep3_token = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
+            nn.init.normal_(self.sep3_token, std=0.02)
+        
         
         # task token
         if self.use_task_token:
@@ -236,7 +244,14 @@ class AICLLM(nn.Module):
         # Time Tokenizer
         time_tokens = self.time_tokenizer(x, te)
         time_tokens_idx = st_embedding.shape[1]
-        st_embedding = torch.concat((time_tokens, st_embedding), dim=1)
+        
+        # sep3_token between spatial and temporal
+        if self.use_sep3_token:
+            sep3_token = self.sep3_token.repeat(B, 1, 1)
+            st_embedding = torch.concat((time_tokens, sep3_token, st_embedding), dim=1)
+            time_tokens_idx += 1  # account for sep3_token
+        else:
+            st_embedding = torch.concat((time_tokens, st_embedding), dim=1)
 
         if self.use_sep2_token:
             sep2_token = self.sep2_token.repeat(B, 1, 1)
@@ -249,7 +264,7 @@ class AICLLM(nn.Module):
             anchor_tokens = self.anchor_tokenizer(x_diff, te)
             st_embedding = torch.concat((anchor_tokens, st_embedding), dim=1)
         
-        # Final sequence: [TASK] | [QUALITY] | [CONTEXT] | [SEP] | [ANCHOR] | [TIME] | [SPATIAL]
+        # [TASK] | [QUALITY] | [CONTEXT] | [SEP] | [ANCHOR] | [SEP2] | [TIME] | [SEP3] | [SPATIAL]
         sep = None
         if self.use_sep_token:
             sep = self.sep_token.repeat(B, 1, 1)

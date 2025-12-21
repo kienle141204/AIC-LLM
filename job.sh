@@ -19,12 +19,8 @@ conda activate stllm_test
 
 export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
 
-cd /home/user03/VARDiff-test/newtest1/AIC-LLM/code/src
+cd /home/user03/VARDiff-test/newtest2/AIC-LLM/code/src
 bash '../scripts/pems03.sh'
 
 bash '../scripts/pems04.sh'
-
-bash '../scripts/pems07.sh'
-
-bash '../scripts/pems08.sh'
 
