@@ -1,360 +1,353 @@
 import torch 
 from torch import nn
+import torch.nn.functional as F
 import numpy as np
-from utils.utils import lap_eig, topological_sort
 from typing import Optional
-from model.sandglassAttn import SpatialEncoder, SpatialDecoder, LinearEncoder, LinearDecoder, SAG
-from model.embedding import TimeEmbedding, NodeEmbedding
-from model.tokenizer import AnchorDiffTokenizer, Time2Token, Node2Token
-
-class DecodingLayer(nn.Module):
-    def __init__(self, input_dim, emb_dim, output_dim):
-        super(DecodingLayer, self).__init__()
-        hidden_size = (emb_dim + output_dim) * 2 // 3
-
-        self.fc = nn.Sequential(
-            nn.Linear(emb_dim, hidden_size),
-            nn.ReLU(),
-            nn.Linear(hidden_size, output_dim),
-        )
-    
-    def forward(self, x):
-        out = self.fc(x)
-        return out
+from model.graph_tokenizer import ADCRNN_Encoder, ADCRNN_Decoder
 
 class AICLLM(nn.Module):
     def __init__(self, basemodel: nn.Module, sample_len: int, output_len: int,
                  input_dim: int, output_dim: int,
                  node_emb_dim: int,
-                 sag_dim: int, sag_tokens: int,
-                 dropout: float, adj_mx = None, dis_mx = None,
+                 sag_dim: int, sag_tokens: int, 
+                 dropout: float, adj_mx, dis_mx = None,
                  use_node_embedding: bool = True,
-                 use_time_token: bool = True,
-                 use_sandglassAttn: bool = True,
-                 use_anchor_diff_token: int = 0,
-                 use_diff: int = 0,
-                 use_sep_token: bool = True,
-                 use_sep2_token: bool = True,
-                 use_task_token: bool = True,
-                 use_context_token: bool = True,
-                 use_quality_token: bool = True,
-                 task_type: str = 'prediction',
-                 t_dim: int = 64, trunc_k=16, wo_conloss=False) :
+                 use_time_token: bool = True, 
+                 rnn_units=128, rnn_layers=1, cheb_k=3,
+                 prototype_num=20, prototype_dim=64, tod_embed_dim=10, 
+                 use_curriculum_learning=True, use_STE=True,
+                 adaptive_embedding_dim=48, input_embedding_dim=128,
+                 cl_decay_steps=2000, TDAY=288,
+                 **kwargs) :
         super(AICLLM, self).__init__()
 
         self.basemodel = basemodel
+        self.num_nodes = adj_mx.shape[0] if adj_mx is not None else 0
+        
         self.sample_len = sample_len
-        self.output_len = output_len
+        self.horizon = output_len
         self.input_dim = input_dim
         self.output_dim = output_dim
-        self.use_node_embedding = use_node_embedding
-        self.use_time_token = use_time_token
-        self.sag_tokens = sag_tokens
-        self.use_sandglassAttn = use_sandglassAttn
-        self.use_anchor_diff_token = use_anchor_diff_token
-        self.adj_mx = adj_mx
-        self.dis_mx = dis_mx
-        self.use_diff = use_diff 
-        self.use_sep_token = use_sep_token
-        self.use_sep2_token = use_sep2_token
-        self.use_task_token = use_task_token
-        self.use_context_token = use_context_token
-        self.use_quality_token = use_quality_token
-        self.task_type = task_type
-
-        self.topological_sort_node = True
-
-        self.emb_dim = basemodel.dim
-        tim_dim = t_dim*2     #day, week
-        self.setadj(adj_mx,dis_mx)
-
-        # segment embedding
-        self.segment_embeddings = nn.Embedding(
-            num_embeddings=4,
-            embedding_dim=self.emb_dim
-        )
-
-        # separator token
-        if self.use_sep_token:
-            self.sep_token = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
-            nn.init.normal_(self.sep_token, std=0.02)
         
-        # separator2 token
-        if self.use_sep2_token:
-            self.sep2_token = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
-            nn.init.normal_(self.sep2_token, std=0.02)
+        # STSSDL Parameters
+        self.rnn_units = rnn_units
+        self.rnn_layers = rnn_layers
+        self.cheb_k = cheb_k
+        self.prototype_num = prototype_num
+        self.prototype_dim = prototype_dim
+        self.tod_embed_dim = tod_embed_dim
+        self.use_curriculum_learning = use_curriculum_learning
+        self.use_STE = use_STE
+        self.adaptive_embedding_dim = adaptive_embedding_dim
+        self.input_embedding_dim = input_embedding_dim
+        self.node_embedding_dim = node_emb_dim
+        self.cl_decay_steps = cl_decay_steps
+        self.TDAY = TDAY
         
-        # task token
-        if self.use_task_token:
-            self.task_token_forecast = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
-            nn.init.normal_(self.task_token_forecast, std=0.02)
-        
-        # context token
-        if self.use_context_token:
-            self.context_token = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
-            nn.init.normal_(self.context_token, std=0.02)
-            # Context aggregation network
-            self.context_aggregator = nn.Sequential(
-                nn.Linear(sample_len * input_dim, self.emb_dim),
-                nn.GELU(),
-                nn.Linear(self.emb_dim, self.emb_dim),
-                nn.LayerNorm(self.emb_dim)
-            )
-        
-        # quality token (based on diff with anchor)
-        if self.use_quality_token:
-            self.quality_token_high = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
-            nn.init.normal_(self.quality_token_high, std=0.02)
-            self.quality_token_low = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
-            nn.init.normal_(self.quality_token_low, std=0.02)
-            # Input: diff features (mean_diff per sample)
-            self.quality_scorer = nn.Sequential(
-                nn.Linear(1, 16),
-                nn.ReLU(),
-                nn.Linear(16, 1),
-                nn.Sigmoid()
-            )
-        
-        self.time_tokenizer = Time2Token(
-            sample_len=sample_len, 
-            features=input_dim, 
-            emb_dim=self.emb_dim, 
-            tim_dim=tim_dim, 
-            drop_out=dropout
-        )
-
-        if self.use_anchor_diff_token == 1:
-            self.anchor_diff_tokenizer = AnchorDiffTokenizer(
-                sample_len=sample_len, 
-                features=input_dim, 
-                emb_dim=self.emb_dim, 
-                tim_dim=tim_dim, 
-                drop_out=dropout
-            )
-        elif self.use_anchor_diff_token == 2:
-            self.anchor_tokenizer = Time2Token(
-                sample_len=sample_len, 
-                features=input_dim, 
-                emb_dim=self.emb_dim, 
-                tim_dim=tim_dim, 
-                drop_out=dropout
-            )   
-        
-        self.node_tokenizer = Node2Token(
-            sample_len=sample_len, 
-            features=input_dim, 
-            node_emb_dim=node_emb_dim, 
-            emb_dim=self.emb_dim, 
-            tim_dim=tim_dim, 
-            dropout=dropout,
-            use_node_embedding=use_node_embedding
-        )
-
-        self.node_embedding = NodeEmbedding(adj_mx=adj_mx, node_emb_dim=node_emb_dim, k=trunc_k, dropout=dropout)
-        self.time_embedding = TimeEmbedding(t_dim=t_dim)
-
-        if self.use_sandglassAttn:
-            self.sag = SAG(sag_dim=sag_dim, 
-                           sag_tokens=sag_tokens, 
-                           emb_dim=self.emb_dim, 
-                           sample_len=sample_len, 
-                           features=input_dim ,
-                           dropout=dropout
-                           )
-
-
-        self.wo_conloss = wo_conloss
-        
-        self.out_mlp = DecodingLayer(
-            input_dim=output_dim*sample_len,
-            emb_dim=self.emb_dim,
-            output_dim=output_dim * output_len
-        )
-
-        self.layer_norm = nn.LayerNorm(self.emb_dim)
-    
-    def forward(self, x: torch.FloatTensor, xa: torch.FloatTensor, timestamp: torch.Tensor, prompt_prefix: Optional[torch.Tensor]):
-        B, N, TF = x.shape
-        other_loss = []
-        
-        x_spatial = x
-        if self.use_diff == 1:
-            x_diff = x - xa
+        # Adjacency
+        if isinstance(adj_mx, list):
+             self.adj_mx_list = [ torch.tensor(a).cuda() if not isinstance(a, torch.Tensor) else a.cuda() for a in adj_mx]
+        elif isinstance(adj_mx, torch.Tensor):
+             self.adj_mx_list = [adj_mx.cuda()]
+        elif isinstance(adj_mx, np.ndarray):
+             self.adj_mx_list = [torch.tensor(adj_mx).cuda()]
         else:
-            x_diff = xa
-
-        timestamp = timestamp[:, :self.sample_len, :]
-        te = self.time_embedding(timestamp) 
-        ne = self.node_embedding()
-
-        special_tokens_list = []
+             self.adj_mx_list = [] # Should not happen ideally
+             
+        self.d_mx = self.adj_mx_list[0].sum(dim=1) if len(self.adj_mx_list) > 0 else None
         
-        # task token
-        if self.use_task_token:
-            task_token = self.task_token_forecast.repeat(B, 1, 1)
-            special_tokens_list.append(task_token)
+        self.total_embedding_dim = self.tod_embed_dim + self.adaptive_embedding_dim + self.node_embedding_dim
         
-        # quality token (based on diff with anchor)
-        if self.use_quality_token:
-            diff = (x - xa).abs().mean(dim=(1, 2), keepdim=True)  # (B, 1, 1)
-            diff = diff.squeeze(-1)  # (B, 1)
+        # Prototypes
+        self.prototypes = self.construct_prototypes()
+        
+        # STE & Projection
+        if self.use_STE:
+            if self.adaptive_embedding_dim > 0:
+                self.adaptive_embedding = nn.init.xavier_uniform_(
+                    nn.Parameter(torch.empty(12, self.num_nodes, self.adaptive_embedding_dim))
+                )
             
-            quality_score = self.quality_scorer(diff)  # (B, 1)
+            # Input dim changes if we project
+            self.input_proj = nn.Linear(self.input_dim, self.input_embedding_dim)
             
-            quality_token = (quality_score.unsqueeze(-1) * self.quality_token_high + 
-                           (1 - quality_score.unsqueeze(-1)) * self.quality_token_low)
-            quality_token = quality_token.repeat(1, 1, 1)  # (B, 1, emb_dim)
-            special_tokens_list.append(quality_token)
-        
-        # context token
-        if self.use_context_token:
-            x_context = x.mean(dim=1)  # (B, TF)
-            context_embedding = self.context_aggregator(x_context)  # (B, emb_dim)
-            context_token = self.context_token.repeat(B, 1, 1) + context_embedding.unsqueeze(1)
-            special_tokens_list.append(context_token)
+            self.node_embedding = nn.Parameter(torch.empty(self.num_nodes, self.node_embedding_dim))
+            self.time_embedding = nn.Parameter(torch.empty(self.TDAY, self.tod_embed_dim))
+            nn.init.xavier_uniform_(self.node_embedding)
+            nn.init.xavier_uniform_(self.time_embedding)
 
-        # spatial tokenizer 
-        spatial_tokens = self.node_tokenizer(x_spatial, te, ne)  # (B, N, emb_dim)
-        if self.topological_sort_node:
-            spatial_tokens = spatial_tokens[:, self.node_order, :]
+        # LLM Integration
+        st_feature_dim = self.input_embedding_dim + self.total_embedding_dim
+        self.llm_in_proj = nn.Linear(st_feature_dim, basemodel.dim)
+        self.llm_out_proj = nn.Linear(basemodel.dim, st_feature_dim)
         
-        # st_embedding = spatial_tokens
-        s_num = N
-        s_num = self.sag_tokens
+        # Encoder
+        self.encoder = ADCRNN_Encoder(
+            self.num_nodes, 
+            st_feature_dim, # input to encoder
+            self.rnn_units, 
+            self.cheb_k, 
+            self.rnn_layers, 
+            len(self.adj_mx_list)
+        )
         
-        # Lưu spatial_tokens gốc trước khi encode cho decoder
-        spatial_tokens_raw = spatial_tokens
-        
-        # Precoder
-        if self.use_sandglassAttn:
-            spatial_tokens_encoded, attn_weights = self.sag.encode(spatial_tokens)
-        else:
-            spatial_tokens_encoded, attn_weights = self.precoder(spatial_tokens)    
-
-        
-        if self.use_sandglassAttn and not self.wo_conloss:
-            if attn_weights is not None:
-                scale = attn_weights.sum(dim=1)    #(B,N)
-
-                sag_score = torch.einsum('bmn,bhn->bhm',self.adj_mx[None,:,:],attn_weights)
-                other_loss.append(-((sag_score*attn_weights-attn_weights*attn_weights)).sum(dim=2).mean()*10)
-
-                Dirichlet = torch.distributions.dirichlet.Dirichlet(self.alpha)
-                other_loss.append(-Dirichlet.log_prob(torch.softmax(scale,dim=-1)).sum())
-        
-        # Time Tokenizer
-        time_tokens = self.time_tokenizer(x, te)
-        time_tokens_idx = spatial_tokens_encoded.shape[1]
-        # st_embedding = torch.concat((time_tokens, st_embedding), dim=1)
-
-        # Khởi tạo các biến trước
-        anchor_tokens = None
-        special_tokens = None
-        
-        if self.use_sep2_token:
-            sep2_token = self.sep2_token.repeat(B, 1, 1)
-
-        if self.use_anchor_diff_token == 1:
-            anchor_tokens = self.anchor_diff_tokenizer(x, xa, te)
-        elif self.use_anchor_diff_token == 2:
-            anchor_tokens = self.anchor_tokenizer(x_diff, te)
-        
-        # Final sequence: [SPECIAL] | [ANCHOR] | [TIME] | [SPATIAL]
-        if len(special_tokens_list) > 0:
-            special_tokens = torch.concat(special_tokens_list, dim=1)  # (B, num_special, emb_dim)
-        
-        num_special = special_tokens.shape[1] if special_tokens is not None else 0
-        num_anchor = anchor_tokens.shape[1] if anchor_tokens is not None else 0
-        num_time = time_tokens.shape[1] if time_tokens is not None else 0
-        num_spatial = spatial_tokens_encoded.shape[1] if spatial_tokens_encoded is not None else 0
-
-        segments_ids_list = []
-
-        if num_special > 0:
-            segments_ids_list.append(torch.full((B, num_special), 0, dtype=torch.long, device=x.device))
-        if num_anchor > 0:
-            segments_ids_list.append(torch.full((B, num_anchor), 1, dtype=torch.long, device=x.device))
-        if num_time > 0:
-            segments_ids_list.append(torch.full((B, num_time), 2, dtype=torch.long, device=x.device))
-        if num_spatial > 0:
-            segments_ids_list.append(torch.full((B, num_spatial), 3, dtype=torch.long, device=x.device))
-
-        if len(segments_ids_list) > 0:
-            segments_ids = torch.concat(segments_ids_list, dim=1)
-            segment_emb = self.segment_embeddings(segments_ids)
-        else:
-            segment_emb = None
-
-        tokens_list = []
-        if special_tokens is not None:
-            tokens_list.append(special_tokens)
-        if anchor_tokens is not None:
-            tokens_list.append(anchor_tokens)
-        tokens_list.append(time_tokens)
-        tokens_list.append(spatial_tokens_encoded)  # Dùng encoded version
-        
-        st_embedding = torch.cat(tokens_list, dim=1)  # (B, total_seq_len, emb_dim)
-        
-        if segment_emb is not None:
-            st_embedding = st_embedding + segment_emb
-        
-        hidden_state = st_embedding
-
-        hidden_state = self.basemodel(hidden_state)
-        s_state = hidden_state[:, -s_num:, :]  
-
         # Decoder
-        if self.use_sandglassAttn:
-            s_state = self.sag.decode(s_state, spatial_tokens_raw)
+        self.decoder_dim = self.rnn_units + self.prototype_dim
+        if self.use_STE:
+             decoder_input_dim = self.input_embedding_dim + self.total_embedding_dim - self.adaptive_embedding_dim
         else:
-            s_state = self.decoder(s_state, spatial_tokens_raw)  
-        s_state += spatial_tokens_raw
+             decoder_input_dim = self.output_dim
+             
+        self.decoder = ADCRNN_Decoder(
+            self.num_nodes, 
+            decoder_input_dim, 
+            self.decoder_dim, 
+            self.cheb_k, 
+            self.rnn_layers, 
+            1 
+        )
+        
+        # Output
+        self.proj = nn.Sequential(nn.Linear(self.decoder_dim, self.output_dim, bias=True))
+        
+        # Graph / Hypernet
+        self.hypernet = nn.Sequential(nn.Linear(self.decoder_dim*2, self.tod_embed_dim, bias=True))
 
-        if self.topological_sort_node:
-            s_state = s_state[:,self.node_order_rev,:]
+        self.act_fn = 'sigmoid'
+        
+        self.wo_conloss = False # default
 
-        if self.use_time_token:
-            t_state = hidden_state[:,-time_tokens_idx-1:-time_tokens_idx,:]
-            t_state += time_tokens[:,-1:,:]
-            s_state += t_state
-
-        s_state = self.layer_norm(s_state)
-
-        out = self.out_mlp(s_state)
-
-        return out, other_loss
-            
+    def construct_prototypes(self):
+        prototypes_dict = nn.ParameterDict()
+        prototype = torch.randn(self.prototype_num, self.prototype_dim)
+        prototypes_dict['prototypes'] = nn.Parameter(prototype, requires_grad=True)     # (M, d)
+        prototypes_dict['Wq'] = nn.Parameter(torch.randn(self.rnn_units, self.prototype_dim), requires_grad=True)    # project to query
+        for param in prototypes_dict.values():
+            nn.init.xavier_normal_(param)
+        return prototypes_dict
     
+    def query_prototypes(self, h_t):
+        query = torch.matmul(h_t, self.prototypes['Wq'])     # (B, N, d)
+        att_score = torch.softmax(torch.matmul(query, self.prototypes['prototypes'].t()), dim=-1)         # alpha: (B, N, M)
+        value = torch.matmul(att_score, self.prototypes['prototypes'])     # (B, N, d)
+        _, ind = torch.topk(att_score, k=2, dim=-1)
+        pos = self.prototypes['prototypes'][ind[:, :, 0]] # B, N, d
+        neg = self.prototypes['prototypes'][ind[:, :, 1]] # B, N, d
+        mask = torch.stack([ind[:, :, 0], ind[:, :, 1]], dim=-1) # B, N, 2
+        return value, query, pos, neg, mask
+
+    def calculate_distance(self, pos, pos_his, mask=None):
+        score = torch.sum(torch.abs(pos - pos_his), dim=-1)
+        return score, mask
+
+    def compute_sampling_threshold(self, batches_seen):
+        return self.cl_decay_steps / (self.cl_decay_steps + np.exp(batches_seen / self.cl_decay_steps))
+
     def grad_state_dict(self):
         params_to_save = filter(lambda p: p[1].requires_grad, self.named_parameters())
         save_list = [p[0] for p in params_to_save]
         return  {name: param.detach() for name, param in self.state_dict().items() if name in save_list}
         
-    
     def save(self, path:str):
-        
         selected_state_dict = self.grad_state_dict()
         torch.save(selected_state_dict, path)
     
     def load(self, path:str):
-
         loaded_params = torch.load(path)
         self.load_state_dict(loaded_params,strict=False)
     
     def params_num(self):
         total_params = sum(p.numel() for p in self.parameters())
-        total_params += sum(p.numel() for p in self.buffers())
-        
-        total_trainable_params = sum(
-            p.numel() for p in self.parameters() if p.requires_grad)
-        
+        total_trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
         return total_params, total_trainable_params
 
-    def setadj(self,adj_mx,dis_mx):
+    def forward(self, x, x_cov, timestamp, prompt_prefix=None, batches_seen=None):
+        # x is (B, N, TF). Needs to be (B, T, N, F)
+        
+        B, N, TF = x.shape
+        T = self.sample_len
+        F = self.input_dim # Should match TF/T
+        
+        x = x.view(B, N, T, F).permute(0, 2, 1, 3) # (B, T, N, F)
+        
+        # Feature Construction (STE)
+        if self.use_STE:
+            # x Projection
+            if self.input_embedding_dim > 0:
+                x_emb = self.input_proj(x)
+            else:
+                x_emb = x
+            
+            features = [x_emb]
+            
+            # Time Embedding
+            
+            if self.tod_embed_dim > 0:
+                # Assuming timestamp 0 is TOD (0-1).
+                # Expand first
+                tod = timestamp[:, :self.sample_len, 0] # (B, T)
+                tod = tod.unsqueeze(-1).expand(-1, -1, N) # (B, T, N)
+                
+                # Discretize
+                tod_idx = (tod * self.TDAY).long()
+                tod_idx = torch.clamp(tod_idx, 0, self.TDAY - 1)
+                time_emb = self.time_embedding[tod_idx] # (B, T, N, d)
+                features.append(time_emb)
+            
+            # Adaptive
+            if self.adaptive_embedding_dim > 0:
+                adp_emb = self.adaptive_embedding.expand(size=(B, *self.adaptive_embedding.shape)) # (B, 12, N, d) -> (B, T, N, d)
+                if adp_emb.shape[1] != self.sample_len:
+                     # Resize or crop?
+                     if adp_emb.shape[1] > self.sample_len:
+                         adp_emb = adp_emb[:, :self.sample_len, :, :]
+                     else:
+                         adp_emb = F.pad(adp_emb, (0,0,0,0,0,0,0, self.sample_len - adp_emb.shape[1]))
+                         
+                features.append(adp_emb)
+            
+            # Node Embedding
+            if self.node_embedding_dim > 0:
+                node_emb = self.node_embedding.unsqueeze(0).unsqueeze(1).expand(B, self.sample_len, -1, -1)
+                features.append(node_emb)
+                
+            x_combined = torch.cat(features, dim=-1) # (B, T, N, D_total)
+        else:
+             x_combined = x
 
-        self.adj_mx = torch.tensor(adj_mx).cuda()
-        self.dis_mx = torch.tensor(dis_mx).cuda()
-        self.d_mx = self.adj_mx.sum(dim=1)
-        N = self.adj_mx.shape[0]
-        self.alpha = torch.tensor([1.05] * N).cuda() + torch.softmax(self.d_mx,dim=0)*5 
-        self.node_order,self.node_order_rev = topological_sort(adj_mx)
+        # LLM Injection
+        # (B, T, N, D) -> (B*N, T, D)
+        
+        BN_T_D = x_combined.permute(0, 2, 1, 3).reshape(B*N, T, -1) # (B*N, T, D)
+        
+        # Project D -> LLM_Dim
+        llm_in = self.llm_in_proj(BN_T_D) # (B*N, T, LLM_Dim)
+        
+        # Run LLM
+        # basemodel returns hidden_states.
+        llm_out = self.basemodel(llm_in) # (B*N, T, LLM_Dim)
+        
+        # Project back
+        llm_out_proj = self.llm_out_proj(llm_out) # (B*N, T, D_total)
+        
+        # Reshape to (B, T, N, D)
+        x_encoded_llm = llm_out_proj.reshape(B, N, T, -1).permute(0, 2, 1, 3) # (B, T, N, D)
+        
+        # 3. STSSDL Processing (Encoder -> Prototypes -> Decoder)
+        supports_en = self.adj_mx_list
+        init_state = self.encoder.init_hidden(B)
+        
+        # Encoder
+        h_en, state_en = self.encoder(x_encoded_llm, init_state, supports_en) # (B, T, N, hidden)
+        
+        # Last State
+        h_t = h_en[:, -1, :, :] # (B, N, hidden)
+        
+        # Prototypes
+        v_t, q_t, p_t, n_t, mask = self.query_prototypes(h_t)
+        
+        # Historical / Anchor logic
+        x_his = x_cov 
+        
+        other_loss = []
+        
+        h_a = None
+        if x_his is not None:
+             # Reprocess x_his like x
+             B, N, TF_his = x_his.shape
+             x_his_view = x_his.view(B, N, T, F).permute(0, 2, 1, 3)
+             
+             # STE for Hist
+             if self.use_STE:
+                if self.input_embedding_dim > 0:
+                    x_his_emb = self.input_proj(x_his_view)
+                else:
+                    x_his_emb = x_his_view
+                features_his = [x_his_emb]
+
+                features.append(time_emb) if self.tod_embed_dim > 0 else None
+                if self.adaptive_embedding_dim > 0: features_his.append(adp_emb)
+                if self.node_embedding_dim > 0: features_his.append(node_emb)
+                
+                x_his_combined = torch.cat(features_his, dim=-1)
+             else:
+                x_his_combined = x_his_view
+             
+             # (B*N, T, D)
+             BN_T_D_his = x_his_combined.permute(0, 2, 1, 3).reshape(B*N, T, -1)
+             llm_in_his = self.llm_in_proj(BN_T_D_his)
+             llm_out_his = self.basemodel(llm_in_his)
+             llm_out_proj_his = self.llm_out_proj(llm_out_his)
+             x_encoded_llm_his = llm_out_proj_his.reshape(B, N, T, -1).permute(0, 2, 1, 3)
+             
+             h_his_en, _ = self.encoder(x_encoded_llm_his, init_state, supports_en)
+             h_a = h_his_en[:, -1, :, :]
+             
+             v_a, q_a, p_a, n_a, mask_his = self.query_prototypes(h_a)
+             
+             # Losses
+             latent_dis, _ = self.calculate_distance(q_t, q_a)
+             prototype_dis, mask_dis = self.calculate_distance(p_t, p_a)
+             
+             # Add deviation loss?
+             loss_d = F.l1_loss(latent_dis.detach(), prototype_dis)
+             other_loss.append(loss_d) # Weighted?
+             
+             # Contrastive
+             contrastive_loss_fn = nn.TripletMarginLoss(margin=0.5)
+             loss_c = contrastive_loss_fn(q_t.detach(), p_t, n_t)
+             other_loss.append(loss_c)
+             
+             h_aug = torch.cat([h_t, v_t, h_a, v_a], dim=-1)
+        else:
+             h_aug = torch.cat([h_t, v_t, h_t, v_t], dim=-1) # Fallback
+             
+        # HyperNet -> Supports
+        node_embeddings = self.hypernet(h_aug) 
+        support = F.softmax(F.relu(torch.einsum('bnc,bmc->bnm', node_embeddings, node_embeddings)), dim=-1) 
+        supports_de = [support]
+        
+        # Decoder
+        h_de = torch.cat([h_t, v_t], dim=-1)
+        ht_list = [h_de] * self.rnn_layers
+        
+        # Go Token (Zeros)
+        go = torch.zeros((B, N, self.output_dim), device=x.device)
+        
+        out_preds = []
+        
+        for t in range(self.horizon):
+             if self.use_STE:
+                 if self.input_embedding_dim > 0:
+                     go_emb = self.input_proj(go.unsqueeze(1)).squeeze(1) # (B, N, D)
+                 else:
+                     go_emb = go
+                 
+                 features_de = [go_emb]
+
+                 if timestamp.shape[1] >= self.sample_len + self.horizon:
+                      curr_t_idx = self.sample_len + t
+                      tod_de = timestamp[:, curr_t_idx, 0].unsqueeze(-1).expand(-1, N) # (B, N)
+                      tod_idx_de = (tod_de * self.TDAY).long().clamp(0, self.TDAY-1)
+                      time_emb_de = self.time_embedding[tod_idx_de] # (B, N, d)
+                      features_de.append(time_emb_de)
+                 elif self.tod_embed_dim > 0:
+                      # Falback if no timestamp
+                      features_de.append(torch.zeros(B, N, self.tod_embed_dim, device=x.device))
+
+                 if self.node_embedding_dim > 0:
+                      features_de.append(self.node_embedding.unsqueeze(0).expand(B, -1, -1))
+                      
+                 go_combined = torch.cat(features_de, dim=-1)
+                 
+                 h_de, ht_list = self.decoder(go_combined, ht_list, supports_de)
+             else:
+                 h_de, ht_list = self.decoder(go, ht_list, supports_de)
+                 
+             pred = self.proj(h_de) # (B, N, out)
+             out_preds.append(pred)
+             go = pred
+             
+        output = torch.stack(out_preds, dim=1) # (B, Horizon, N, Out)
+        
+        return output, other_loss
