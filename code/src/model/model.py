@@ -68,7 +68,6 @@ class AICLLM(nn.Module):
                     nn.Parameter(torch.empty(12, self.num_nodes, self.adaptive_embedding_dim))
                 )
             
-            # Input dim changes if we project
             self.input_proj = nn.Linear(self.input_dim, self.input_embedding_dim)
             
             self.node_embedding = nn.Parameter(torch.empty(self.num_nodes, self.node_embedding_dim))
@@ -77,7 +76,7 @@ class AICLLM(nn.Module):
             nn.init.xavier_uniform_(self.time_embedding)
 
         # LLM Integration
-        st_feature_dim = self.input_embedding_dim + self.total_embedding_dim
+        st_feature_dim = (self.input_embedding_dim + self.total_embedding_dim) * self.sample_len
         self.llm_in_proj = nn.Linear(st_feature_dim, basemodel.dim)
         self.llm_out_proj = nn.Linear(basemodel.dim, st_feature_dim)
         
@@ -183,8 +182,6 @@ class AICLLM(nn.Module):
             # Time Embedding
             
             if self.tod_embed_dim > 0:
-                # Assuming timestamp 0 is TOD (0-1).
-                # Expand first
                 tod = timestamp[:, :self.sample_len, 0] # (B, T)
                 tod = tod.unsqueeze(-1).expand(-1, -1, N) # (B, T, N)
                 
@@ -216,22 +213,21 @@ class AICLLM(nn.Module):
              x_combined = x
 
         # LLM Injection
-        # (B, T, N, D) -> (B*N, T, D)
+        # (B, T, N, D) -> (B, N, T*D)
         
-        BN_T_D = x_combined.permute(0, 2, 1, 3).reshape(B*N, T, -1) # (B*N, T, D)
+        B_T_N_D = x_combined.permute(0, 2, 1, 3).reshape(B, N, -1) # (B, N, T*D)
         
         # Project D -> LLM_Dim
-        llm_in = self.llm_in_proj(BN_T_D) # (B*N, T, LLM_Dim)
+        llm_in = self.llm_in_proj(B_T_N_D) # (B, N, LLM_Dim)
         
         # Run LLM
-        # basemodel returns hidden_states.
-        llm_out = self.basemodel(llm_in) # (B*N, T, LLM_Dim)
+        llm_out = self.basemodel(llm_in) # (B, N, LLM_Dim)
         
         # Project back
-        llm_out_proj = self.llm_out_proj(llm_out) # (B*N, T, D_total)
+        llm_out_proj = self.llm_out_proj(llm_out) # (B, N, T*D)
         
         # Reshape to (B, T, N, D)
-        x_encoded_llm = llm_out_proj.reshape(B, N, T, -1).permute(0, 2, 1, 3) # (B, T, N, D)
+        x_encoded_llm = llm_out_proj.view(B, N, T, -1).permute(0, 2, 1, 3) # (B, T, N, D)
         
         # 3. STSSDL Processing (Encoder -> Prototypes -> Decoder)
         supports_en = self.adj_mx_list
@@ -273,13 +269,13 @@ class AICLLM(nn.Module):
                 x_his_combined = torch.cat(features_his, dim=-1)
              else:
                 x_his_combined = x_his_view
-             
-             # (B*N, T, D)
-             BN_T_D_his = x_his_combined.permute(0, 2, 1, 3).reshape(B*N, T, -1)
-             llm_in_his = self.llm_in_proj(BN_T_D_his)
+             # LLM for history?
+             # (B, N, T*D)
+             B_T_N_D_his = x_his_combined.permute(0, 2, 1, 3).reshape(B, N, -1)
+             llm_in_his = self.llm_in_proj(B_T_N_D_his)
              llm_out_his = self.basemodel(llm_in_his)
              llm_out_proj_his = self.llm_out_proj(llm_out_his)
-             x_encoded_llm_his = llm_out_proj_his.reshape(B, N, T, -1).permute(0, 2, 1, 3)
+             x_encoded_llm_his = llm_out_proj_his.view(B, N, T, -1).permute(0, 2, 1, 3)
              
              h_his_en, _ = self.encoder(x_encoded_llm_his, init_state, supports_en)
              h_a = h_his_en[:, -1, :, :]
