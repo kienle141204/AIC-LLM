@@ -286,18 +286,18 @@ class AICLLM(nn.Module):
              latent_dis, _ = self.calculate_distance(q_t, q_a)
              prototype_dis, mask_dis = self.calculate_distance(p_t, p_a)
              
-             # Add deviation loss?
+             # deviation loss
              loss_d = F.l1_loss(latent_dis.detach(), prototype_dis)
-             other_loss.append(loss_d) # Weighted?
+             other_loss.append(loss_d * 1) # Weight
              
-             # Contrastive
+             # contrastive
              contrastive_loss_fn = nn.TripletMarginLoss(margin=0.5)
              loss_c = contrastive_loss_fn(q_t.detach(), p_t, n_t)
-             other_loss.append(loss_c)
+             other_loss.append(loss_c * 0.1)
              
              h_aug = torch.cat([h_t, v_t, h_a, v_a], dim=-1)
         else:
-             h_aug = torch.cat([h_t, v_t, h_t, v_t], dim=-1) # Fallback
+             h_aug = torch.cat([h_t, v_t, h_t, v_t], dim=-1) 
              
         # HyperNet -> Supports
         node_embeddings = self.hypernet(h_aug) 
