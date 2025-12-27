@@ -76,14 +76,15 @@ class AICLLM(nn.Module):
             nn.init.xavier_uniform_(self.time_embedding)
 
         # LLM Integration
-        st_feature_dim = (self.input_embedding_dim + self.total_embedding_dim) * self.sample_len
+        self.feature_dim_per_step = self.input_embedding_dim + self.total_embedding_dim  # feature dim per timestep
+        st_feature_dim = self.feature_dim_per_step * self.sample_len  # total flattened dim for LLM
         self.llm_in_proj = nn.Linear(st_feature_dim, basemodel.dim)
         self.llm_out_proj = nn.Linear(basemodel.dim, st_feature_dim)
         
-        # Encoder
+        # Encoder: input is (B, T, N, feature_dim_per_step), not flattened
         self.encoder = ADCRNN_Encoder(
             self.num_nodes, 
-            st_feature_dim, # input to encoder
+            self.feature_dim_per_step,  # input dim per timestep, NOT st_feature_dim
             self.rnn_units, 
             self.cheb_k, 
             self.rnn_layers, 
@@ -165,9 +166,9 @@ class AICLLM(nn.Module):
         
         B, N, TF = x.shape
         T = self.sample_len
-        F = self.input_dim # Should match TF/T
+        feat_dim = self.input_dim  # Renamed from F to avoid shadowing torch.nn.functional
         
-        x = x.view(B, N, T, F).permute(0, 2, 1, 3) # (B, T, N, F)
+        x = x.view(B, N, T, feat_dim).permute(0, 2, 1, 3)  # (B, T, N, feat_dim)
         
         # Feature Construction (STE)
         if self.use_STE:
@@ -195,7 +196,6 @@ class AICLLM(nn.Module):
             if self.adaptive_embedding_dim > 0:
                 adp_emb = self.adaptive_embedding.expand(size=(B, *self.adaptive_embedding.shape)) # (B, 12, N, d) -> (B, T, N, d)
                 if adp_emb.shape[1] != self.sample_len:
-                     # Resize or crop?
                      if adp_emb.shape[1] > self.sample_len:
                          adp_emb = adp_emb[:, :self.sample_len, :, :]
                      else:
@@ -251,7 +251,7 @@ class AICLLM(nn.Module):
         if x_his is not None:
              # Reprocess x_his like x
              B, N, TF_his = x_his.shape
-             x_his_view = x_his.view(B, N, T, F).permute(0, 2, 1, 3)
+             x_his_view = x_his.view(B, N, T, feat_dim).permute(0, 2, 1, 3)
              
              # STE for Hist
              if self.use_STE:
