@@ -265,7 +265,8 @@ class AICLLM(nn.Module):
                     x_his_emb = x_his_view
                 features_his = [x_his_emb]
 
-                features.append(time_emb) if self.tod_embed_dim > 0 else None
+                if self.tod_embed_dim > 0:
+                     features_his.append(time_emb)
                 if self.adaptive_embedding_dim > 0: features_his.append(adp_emb)
                 if self.node_embedding_dim > 0: features_his.append(node_emb)
                 
