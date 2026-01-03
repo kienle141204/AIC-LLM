@@ -36,7 +36,8 @@ python main.py \
     --use_diff 0 \
     --use_task_token \
     --use_context_token \
-    --use_quality_token
+    --use_quality_token \
+    --use_learnable_anchor
 
 # python main.py \
 #     --data_path '../../data/traffic/PEMS08/PEMS08.npz' \
