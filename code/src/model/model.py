@@ -229,7 +229,7 @@ class AICLLM(nn.Module):
         # Reshape to (B, T, N, D)
         x_encoded_llm = llm_out_proj.view(B, N, T, -1).permute(0, 2, 1, 3) # (B, T, N, D)
         
-        # 3. STSSDL Processing (Encoder -> Prototypes -> Decoder)
+        # STSSDL Processing (Encoder -> Prototypes -> Decoder)
         supports_en = self.adj_mx_list
         init_state = self.encoder.init_hidden(B)
         
@@ -269,7 +269,6 @@ class AICLLM(nn.Module):
                 x_his_combined = torch.cat(features_his, dim=-1)
              else:
                 x_his_combined = x_his_view
-             # LLM for history?
              # (B, N, T*D)
              B_T_N_D_his = x_his_combined.permute(0, 2, 1, 3).reshape(B, N, -1)
              llm_in_his = self.llm_in_proj(B_T_N_D_his)
