@@ -3,7 +3,7 @@ from torch import nn
 import numpy as np
 from utils.utils import lap_eig, topological_sort
 from typing import Optional
-from model.sandglassAttn import SpatialEncoder, SpatialDecoder, LinearEncoder, LinearDecoder, SAG
+from model.sandglassAttn import SAG, PerceiverSAG, SetTransformerSAG, PoolingSAG
 from model.embedding import TimeEmbedding, NodeEmbedding
 from model.tokenizer import AnchorDiffTokenizer, Time2Token, Node2Token
 
@@ -30,7 +30,7 @@ class AICLLM(nn.Module):
                  dropout: float, adj_mx = None, dis_mx = None,
                  use_node_embedding: bool = True,
                  use_time_token: bool = True,
-                 use_sandglassAttn: bool = True,
+                 use_sandglassAttn: int = 0,
                  use_anchor_diff_token: int = 0,
                  use_diff: int = 0,
                  use_sep_token: bool = True,
@@ -146,8 +146,9 @@ class AICLLM(nn.Module):
 
         self.node_embedding = NodeEmbedding(adj_mx=adj_mx, node_emb_dim=node_emb_dim, k=trunc_k, dropout=dropout)
         self.time_embedding = TimeEmbedding(t_dim=t_dim)
-
-        if self.use_sandglassAttn:
+        
+        # Sandglass Attn
+        if self.use_sandglassAttn == 0:
             self.sag = SAG(sag_dim=sag_dim, 
                            sag_tokens=sag_tokens, 
                            emb_dim=self.emb_dim, 
@@ -155,6 +156,30 @@ class AICLLM(nn.Module):
                            features=input_dim ,
                            dropout=dropout
                            )
+        elif self.use_sandglassAttn == 1:
+            self.sag = PerceiverSAG(sag_dim=sag_dim, 
+                                    sag_tokens=sag_tokens, 
+                                    emb_dim=self.emb_dim, 
+                                    sample_len=sample_len, 
+                                    features=input_dim ,
+                                    dropout=dropout
+                                    )
+        elif self.use_sandglassAttn == 2:
+            self.sag = SetTransformerSAG(sag_dim=sag_dim, 
+                                        sag_tokens=sag_tokens, 
+                                        emb_dim=self.emb_dim, 
+                                        sample_len=sample_len, 
+                                        features=input_dim ,
+                                        dropout=dropout
+                                        )
+        elif self.use_sandglassAttn == 3:
+            self.sag = PoolingSAG(sag_dim=sag_dim, 
+                                  sag_tokens=sag_tokens, 
+                                  emb_dim=self.emb_dim, 
+                                  sample_len=sample_len,    
+                                  features=input_dim ,
+                                  dropout=dropout
+                                  )
 
 
         self.wo_conloss = wo_conloss
