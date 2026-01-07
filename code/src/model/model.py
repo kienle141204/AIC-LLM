@@ -441,20 +441,30 @@ class AICLLM(nn.Module):
             if isinstance(state, torch.Tensor) and state.dim() > 1 and state.shape[0] > 1:
                 state = state.mean(dim=0, keepdim=True)
             
-            # Safely squeeze tensors
-            def safe_squeeze(t):
+            # Safely squeeze tensors - handle both float and integer types
+            def safe_squeeze_float(t):
+                """For float tensors like log_prob and value"""
                 if isinstance(t, torch.Tensor):
                     if t.dim() > 0:
-                        return t.mean()
+                        return t.float().mean()
                     return t
-                return torch.tensor(t, device=state.device if isinstance(state, torch.Tensor) else 'cuda')
+                return torch.tensor(float(t), device=state.device if isinstance(state, torch.Tensor) else 'cuda')
+            
+            def safe_squeeze_int(t):
+                """For integer tensors like num_tokens (action)"""
+                if isinstance(t, torch.Tensor):
+                    if t.dim() > 0:
+                        # Take first element or most common value for action
+                        return t[0].float()  # Convert to float for storage
+                    return t.float()
+                return torch.tensor(float(t), device=state.device if isinstance(state, torch.Tensor) else 'cuda')
             
             # Store transition
             self.rl_trainer.store_transition(
                 state=state.squeeze(0) if isinstance(state, torch.Tensor) and state.dim() > 1 else state,
-                action=safe_squeeze(rl_info['num_tokens']),
-                log_prob=safe_squeeze(rl_info['log_prob']),
-                value=safe_squeeze(rl_info['value']),
+                action=safe_squeeze_int(rl_info['num_tokens']),
+                log_prob=safe_squeeze_float(rl_info['log_prob']),
+                value=safe_squeeze_float(rl_info['value']),
                 reward=reward,
                 done=done
             )
