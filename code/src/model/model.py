@@ -426,7 +426,7 @@ class AICLLM(nn.Module):
             return
             
         rl_info = self.get_rl_info()
-        if rl_info.get('log_prob') is not None:
+        if rl_info.get('log_prob') is not None and rl_info.get('state') is not None:
             # Compute reward
             reward = self.rl_trainer.compute_reward(
                 mae_loss=mae_loss,
@@ -434,17 +434,27 @@ class AICLLM(nn.Module):
                 max_tokens=self.sag_tokens
             )
             
-            # Get state from policy
-            state = self.sag.token_policy.get_state(
-                torch.ones(1, self.sag_tokens, self.emb_dim).cuda()  # Dummy state
-            )
+            # Use state from rl_info (already computed during encode)
+            state = rl_info['state']
+            
+            # Handle batch dimension - take mean over batch for single state
+            if isinstance(state, torch.Tensor) and state.dim() > 1 and state.shape[0] > 1:
+                state = state.mean(dim=0, keepdim=True)
+            
+            # Safely squeeze tensors
+            def safe_squeeze(t):
+                if isinstance(t, torch.Tensor):
+                    if t.dim() > 0:
+                        return t.mean()
+                    return t
+                return torch.tensor(t, device=state.device if isinstance(state, torch.Tensor) else 'cuda')
             
             # Store transition
             self.rl_trainer.store_transition(
-                state=rl_info.get('value', torch.zeros(1)),
-                action=rl_info['num_tokens'],
-                log_prob=rl_info['log_prob'],
-                value=rl_info['value'],
+                state=state.squeeze(0) if isinstance(state, torch.Tensor) and state.dim() > 1 else state,
+                action=safe_squeeze(rl_info['num_tokens']),
+                log_prob=safe_squeeze(rl_info['log_prob']),
+                value=safe_squeeze(rl_info['value']),
                 reward=reward,
                 done=done
             )

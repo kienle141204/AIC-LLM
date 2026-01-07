@@ -296,56 +296,90 @@ class RLTrainer:
         """
         if len(self.states) == 0:
             return {}
-            
-        # Stack experiences
-        states = torch.stack(self.states)
-        actions = torch.stack(self.actions)
-        old_log_probs = torch.stack(self.log_probs)
         
-        # Compute GAE
-        with torch.no_grad():
-            _, _, next_value, _ = self.policy(states[-1:])
-        advantages, returns = self.compute_gae(next_value[0])
-        
-        # Normalize advantages
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-        
-        total_policy_loss = 0
-        total_value_loss = 0
-        total_entropy = 0
-        
-        for _ in range(epochs):
-            # Evaluate current policy
-            log_probs, values, entropy = self.policy.evaluate_actions(states, actions)
+        try:
+            # Stack experiences - ensure consistent dimensions
+            states = torch.stack(self.states)  # (T, state_dim)
+            actions = torch.stack([a if a.dim() == 0 else a.squeeze() for a in self.actions])  # (T,)
+            old_log_probs = torch.stack([lp if lp.dim() == 0 else lp.squeeze() for lp in self.log_probs])  # (T,)
+            values_stacked = torch.stack([v if v.dim() == 0 else v.squeeze() for v in self.values])  # (T,)
             
-            # Policy loss (PPO clipped objective)
-            ratio = torch.exp(log_probs - old_log_probs)
-            surr1 = ratio * advantages
-            surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * advantages
-            policy_loss = -torch.min(surr1, surr2).mean()
+            # Ensure states have correct dimensions for policy
+            if states.dim() == 1:
+                states = states.unsqueeze(0)
             
-            # Value loss
-            value_loss = F.mse_loss(values, returns)
+            # Compute GAE
+            with torch.no_grad():
+                # Get next value for GAE computation
+                last_state = states[-1:] if states.dim() == 2 else states[-1:].unsqueeze(0)
+                _, _, next_value, _ = self.policy(last_state)
+                next_value = next_value.squeeze()
             
-            # Entropy bonus (for exploration)
-            entropy_loss = -entropy.mean()
+            # Compute advantages using stored values
+            rewards = torch.tensor(self.rewards, device=states.device, dtype=torch.float32)
+            dones = torch.tensor(self.dones, dtype=torch.float32, device=states.device)
             
-            # Total loss
-            loss = (
-                policy_loss +
-                self.value_coef * value_loss +
-                self.entropy_coef * entropy_loss
-            )
+            advantages = []
+            gae = torch.tensor(0.0, device=states.device)
             
-            # Update
-            self.optimizer.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 0.5)
-            self.optimizer.step()
+            for t in reversed(range(len(rewards))):
+                if t == len(rewards) - 1:
+                    next_val = next_value
+                else:
+                    next_val = values_stacked[t + 1]
+                    
+                delta = rewards[t] + self.gamma * next_val * (1 - dones[t]) - values_stacked[t]
+                gae = delta + self.gamma * self.gae_lambda * (1 - dones[t]) * gae
+                advantages.insert(0, gae.clone())
+                
+            advantages = torch.stack(advantages)
+            returns = advantages + values_stacked
             
-            total_policy_loss += policy_loss.item()
-            total_value_loss += value_loss.item()
-            total_entropy += entropy.mean().item()
+            # Normalize advantages
+            if len(advantages) > 1:
+                advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+            
+            total_policy_loss = 0
+            total_value_loss = 0
+            total_entropy = 0
+            
+            for _ in range(epochs):
+                # Evaluate current policy
+                log_probs, values, entropy = self.policy.evaluate_actions(states, actions)
+                
+                # Policy loss (PPO clipped objective)
+                ratio = torch.exp(log_probs - old_log_probs)
+                surr1 = ratio * advantages
+                surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * advantages
+                policy_loss = -torch.min(surr1, surr2).mean()
+                
+                # Value loss
+                value_loss = F.mse_loss(values, returns)
+                
+                # Entropy bonus (for exploration)
+                entropy_loss = -entropy.mean()
+                
+                # Total loss
+                loss = (
+                    policy_loss +
+                    self.value_coef * value_loss +
+                    self.entropy_coef * entropy_loss
+                )
+                
+                # Update
+                self.optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 0.5)
+                self.optimizer.step()
+                
+                total_policy_loss += policy_loss.item()
+                total_value_loss += value_loss.item()
+                total_entropy += entropy.mean().item()
+            
+        except Exception as e:
+            # If there's an error, just clear buffer and return empty
+            self.clear_buffer()
+            return {'error': str(e)}
             
         # Clear buffer
         self.clear_buffer()
@@ -482,6 +516,11 @@ class AdaptiveSAGWrapper(nn.Module):
         """
         B = x.shape[0]
         
+        # Get state for RL (before token selection)
+        state = None
+        if self.use_rl and self.token_policy is not None:
+            state = self.token_policy.get_state(x)
+        
         # Select number of tokens
         num_tokens, log_prob, value, entropy = self.select_tokens(x, deterministic)
         
@@ -504,8 +543,9 @@ class AdaptiveSAGWrapper(nn.Module):
             if attn_weights is not None:
                 attn_weights = attn_weights[:, :effective_tokens, :]
         
-        # Collect RL info
+        # Collect RL info (including state for PPO update)
         rl_info = {
+            'state': state,  # Add state for RL training
             'num_tokens': num_tokens,
             'log_prob': log_prob,
             'value': value,
