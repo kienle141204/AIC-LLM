@@ -2,10 +2,11 @@ import torch
 from torch import nn
 import numpy as np
 from utils.utils import lap_eig, topological_sort
-from typing import Optional
+from typing import Optional, Tuple
 from model.sandglassAttn import SAG, PerceiverSAG, SetTransformerSAG, PoolingSAG
 from model.embedding import TimeEmbedding, NodeEmbedding
 from model.tokenizer import AnchorDiffTokenizer, Time2Token, Node2Token
+from model.adaptive_rl import AdaptiveSAGWrapper, create_adaptive_sag, AdaptiveTokenPolicy, RLTrainer
 
 class DecodingLayer(nn.Module):
     def __init__(self, input_dim, emb_dim, output_dim):
@@ -39,7 +40,8 @@ class AICLLM(nn.Module):
                  use_context_token: bool = True,
                  use_quality_token: bool = True,
                  task_type: str = 'prediction',
-                 t_dim: int = 64, trunc_k=16, wo_conloss=False) :
+                 t_dim: int = 64, trunc_k=16, wo_conloss=False,
+                 use_adaptive_rl: bool = False, min_sag_tokens: int = 4) :
         super(AICLLM, self).__init__()
 
         self.basemodel = basemodel
@@ -61,6 +63,8 @@ class AICLLM(nn.Module):
         self.use_context_token = use_context_token
         self.use_quality_token = use_quality_token
         self.task_type = task_type
+        self.use_adaptive_rl = use_adaptive_rl
+        self.min_sag_tokens = min_sag_tokens
 
         self.topological_sort_node = True
 
@@ -147,40 +151,64 @@ class AICLLM(nn.Module):
         self.node_embedding = NodeEmbedding(adj_mx=adj_mx, node_emb_dim=node_emb_dim, k=trunc_k, dropout=dropout)
         self.time_embedding = TimeEmbedding(t_dim=t_dim)
         
-        # Sandglass Attn
+        # Sandglass Attn - Create base SAG first
         if self.use_sandglassAttn == 0:
-            self.sag = SAG(sag_dim=sag_dim, 
+            base_sag = SAG(sag_dim=sag_dim, 
                            sag_tokens=sag_tokens, 
                            emb_dim=self.emb_dim, 
                            sample_len=sample_len, 
-                           features=input_dim ,
+                           features=input_dim,
                            dropout=dropout
                            )
         elif self.use_sandglassAttn == 1:
-            self.sag = PerceiverSAG(sag_dim=sag_dim, 
+            base_sag = PerceiverSAG(sag_dim=sag_dim, 
                                     sag_tokens=sag_tokens, 
                                     emb_dim=self.emb_dim, 
                                     sample_len=sample_len, 
-                                    features=input_dim ,
+                                    features=input_dim,
                                     dropout=dropout
                                     )
         elif self.use_sandglassAttn == 2:
-            self.sag = SetTransformerSAG(sag_dim=sag_dim, 
+            base_sag = SetTransformerSAG(sag_dim=sag_dim, 
                                         sag_tokens=sag_tokens, 
                                         emb_dim=self.emb_dim, 
                                         sample_len=sample_len, 
-                                        features=input_dim ,
+                                        features=input_dim,
                                         dropout=dropout
                                         )
         elif self.use_sandglassAttn == 3:
-            self.sag = PoolingSAG(sag_dim=sag_dim, 
+            base_sag = PoolingSAG(sag_dim=sag_dim, 
                                   sag_tokens=sag_tokens, 
                                   emb_dim=self.emb_dim, 
                                   sample_len=sample_len,    
-                                  features=input_dim ,
+                                  features=input_dim,
                                   dropout=dropout
                                   )
-
+        else:
+            base_sag = SAG(sag_dim=sag_dim, 
+                           sag_tokens=sag_tokens, 
+                           emb_dim=self.emb_dim, 
+                           sample_len=sample_len, 
+                           features=input_dim,
+                           dropout=dropout
+                           )
+        
+        # Wrap with AdaptiveSAGWrapper if using RL
+        if self.use_adaptive_rl:
+            self.sag = AdaptiveSAGWrapper(
+                sag_module=base_sag,
+                min_tokens=min_sag_tokens,
+                max_tokens=sag_tokens,
+                emb_dim=self.emb_dim,
+                use_rl=True
+            )
+            # Initialize RL trainer (will be set from outside during training)
+            self.rl_trainer = None
+            self.rl_info = {}
+        else:
+            self.sag = base_sag
+            self.rl_trainer = None
+            self.rl_info = {}
 
         self.wo_conloss = wo_conloss
         
@@ -243,7 +271,16 @@ class AICLLM(nn.Module):
         
         # Precoder
         if self.use_sandglassAttn:
-            st_embedding, attn_weights = self.sag.encode(st_embedding)
+            if self.use_adaptive_rl:
+                # AdaptiveSAGWrapper returns (out, attn_weights, rl_info)
+                st_embedding, attn_weights, self.rl_info = self.sag.encode(
+                    st_embedding, 
+                    deterministic=not self.training
+                )
+                # Update s_num based on actual tokens used
+                s_num = self.rl_info.get('effective_tokens', self.sag_tokens)
+            else:
+                st_embedding, attn_weights = self.sag.encode(st_embedding)
         else:
             st_embedding, attn_weights = self.precoder(st_embedding)
 
@@ -350,3 +387,92 @@ class AICLLM(nn.Module):
         N = self.adj_mx.shape[0]
         self.alpha = torch.tensor([1.05] * N).cuda() + torch.softmax(self.d_mx,dim=0)*5 
         self.node_order,self.node_order_rev = topological_sort(adj_mx)
+    
+    # ============ RL-related methods ============
+    
+    def init_rl_trainer(self, lr: float = 1e-4, efficiency_coef: float = 0.1):
+        """
+        Initialize the RL trainer for adaptive token selection.
+        
+        Args:
+            lr: Learning rate for RL policy
+            efficiency_coef: Coefficient for efficiency bonus in reward
+        """
+        if self.use_adaptive_rl and hasattr(self.sag, 'token_policy'):
+            self.rl_trainer = RLTrainer(
+                policy=self.sag.token_policy,
+                lr=lr,
+                efficiency_coef=efficiency_coef
+            )
+    
+    def get_rl_info(self) -> dict:
+        """
+        Get RL information from the last forward pass.
+        
+        Returns:
+            Dictionary containing RL-related info (num_tokens, log_prob, value, entropy)
+        """
+        return self.rl_info
+    
+    def store_rl_transition(self, mae_loss: torch.Tensor, done: bool = False):
+        """
+        Store RL transition and compute reward.
+        
+        Args:
+            mae_loss: MAE loss from prediction
+            done: Whether this is the end of an episode
+        """
+        if self.rl_trainer is None or not self.use_adaptive_rl:
+            return
+            
+        rl_info = self.get_rl_info()
+        if rl_info.get('log_prob') is not None:
+            # Compute reward
+            reward = self.rl_trainer.compute_reward(
+                mae_loss=mae_loss,
+                selected_tokens=rl_info['num_tokens'],
+                max_tokens=self.sag_tokens
+            )
+            
+            # Get state from policy
+            state = self.sag.token_policy.get_state(
+                torch.ones(1, self.sag_tokens, self.emb_dim).cuda()  # Dummy state
+            )
+            
+            # Store transition
+            self.rl_trainer.store_transition(
+                state=rl_info.get('value', torch.zeros(1)),
+                action=rl_info['num_tokens'],
+                log_prob=rl_info['log_prob'],
+                value=rl_info['value'],
+                reward=reward,
+                done=done
+            )
+    
+    def update_rl_policy(self, epochs: int = 4) -> dict:
+        """
+        Update the RL policy using stored transitions.
+        
+        Args:
+            epochs: Number of PPO epochs
+            
+        Returns:
+            Dictionary of loss values from update
+        """
+        if self.rl_trainer is None:
+            return {}
+        return self.rl_trainer.update(epochs=epochs)
+    
+    def get_avg_tokens_used(self) -> float:
+        """
+        Get the average number of tokens used in adaptive mode.
+        
+        Returns:
+            Average token count
+        """
+        if hasattr(self, 'rl_info') and 'num_tokens' in self.rl_info:
+            tokens = self.rl_info['num_tokens']
+            if isinstance(tokens, torch.Tensor):
+                return tokens.float().mean().item()
+            return float(tokens)
+        return float(self.sag_tokens)

@@ -42,6 +42,13 @@ def AddModelArgs(parser):
     parser.add_argument("--use_task_token", action="store_true", help="Enable task type token")
     parser.add_argument("--use_context_token", action="store_true", help="Enable global context summary token")
     parser.add_argument("--use_quality_token", action="store_true", help="Enable input quality assessment token")
+    
+    # RL-based Adaptive Token Selection
+    parser.add_argument("--use_adaptive_rl", action="store_true", help="Enable RL-based adaptive token selection")
+    parser.add_argument("--min_sag_tokens", default=4, type=int, help="Minimum number of SAG tokens when using adaptive RL")
+    parser.add_argument("--rl_lr", default=1e-4, type=float, help="Learning rate for RL policy")
+    parser.add_argument("--rl_efficiency_coef", default=0.1, type=float, help="Efficiency coefficient for RL reward")
+    parser.add_argument("--rl_update_freq", default=10, type=int, help="Frequency of RL policy updates (in batches)")
 
 
 

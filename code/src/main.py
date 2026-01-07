@@ -30,7 +30,8 @@ torch.cuda.manual_seed_all(seed)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
-def TrainEpoch(loader, model, optim, loss_fn, prompt_prefix, scaler, need_step: bool):
+def TrainEpoch(loader, model, optim, loss_fn, prompt_prefix, scaler, need_step: bool, 
+               use_adaptive_rl: bool = False, rl_update_freq: int = 10):
     if need_step:
         model.train()
     else:
@@ -38,6 +39,9 @@ def TrainEpoch(loader, model, optim, loss_fn, prompt_prefix, scaler, need_step: 
 
     loss_item = 0
     count = 0
+    total_tokens_used = 0
+    rl_losses = {'policy_loss': 0, 'value_loss': 0, 'entropy': 0}
+    rl_update_count = 0
 
     for input, input_anchor, target, timestamp in loader:  
         # (B,T,N,F)
@@ -54,6 +58,22 @@ def TrainEpoch(loader, model, optim, loss_fn, prompt_prefix, scaler, need_step: 
 
         loss_item += loss.item()
         count += 1
+        
+        # RL: Track tokens used and store transitions
+        if use_adaptive_rl and need_step:
+            avg_tokens = model.get_avg_tokens_used()
+            total_tokens_used += avg_tokens
+            
+            # Store RL transition
+            model.store_rl_transition(mae_loss=loss, done=False)
+            
+            # Update RL policy periodically
+            if count % rl_update_freq == 0:
+                rl_info = model.update_rl_policy(epochs=4)
+                if rl_info:
+                    for k, v in rl_info.items():
+                        rl_losses[k] += v
+                    rl_update_count += 1
 
         if need_step:
             optim.zero_grad()
@@ -69,8 +89,15 @@ def TrainEpoch(loader, model, optim, loss_fn, prompt_prefix, scaler, need_step: 
 
     if count:
         loss_item /= count
+        
+    # Return additional info for RL
+    result = {
+        'loss': loss_item,
+        'avg_tokens': total_tokens_used / count if count > 0 and use_adaptive_rl else None,
+        'rl_losses': {k: v / rl_update_count if rl_update_count > 0 else 0 for k, v in rl_losses.items()}
+    }
 
-    return loss_item
+    return result
 
 def TestEpoch(loader, model, prompt_prefix, scaler, save=False):
     
@@ -137,22 +164,62 @@ def Train(args, mylogger, model, prompt_prefix, scaler):
 
     train_loss_line = {'x': [], 'y': []}
     val_loss_line = {'x': [], 'y': []}
+    
+    # Initialize RL trainer if using adaptive RL
+    use_adaptive_rl = getattr(args, 'use_adaptive_rl', False)
+    if use_adaptive_rl:
+        rl_lr = getattr(args, 'rl_lr', 1e-4)
+        rl_efficiency_coef = getattr(args, 'rl_efficiency_coef', 0.1)
+        model.init_rl_trainer(lr=rl_lr, efficiency_coef=rl_efficiency_coef)
+        mylogger.info(f"[RL] Initialized RL trainer with lr={rl_lr}, efficiency_coef={rl_efficiency_coef}")
+        mylogger.info(f"[RL] Token range: {args.min_sag_tokens} to {args.sag_tokens}")
 
     for epoch in range(max_epoch):
 
-        train_loss = TrainEpoch(train_loader, model, optim, loss_fn, prompt_prefix, scaler, need_step=True)
-
+        train_result = TrainEpoch(
+            train_loader, model, optim, loss_fn, prompt_prefix, scaler, 
+            need_step=True,
+            use_adaptive_rl=use_adaptive_rl,
+            rl_update_freq=getattr(args, 'rl_update_freq', 10)
+        )
+        
+        train_loss = train_result['loss']
         train_loss_line['x'].append(epoch)
         train_loss_line['y'].append(train_loss)
-
-        mylogger.info(f"epoch {epoch} train_loss:{train_loss}")
+        
+        # Log RL info
+        log_msg = f"epoch {epoch} train_loss:{train_loss:.6f}"
+        if use_adaptive_rl and train_result['avg_tokens'] is not None:
+            log_msg += f" avg_tokens:{train_result['avg_tokens']:.2f}"
+            rl_losses = train_result['rl_losses']
+            if rl_losses['policy_loss'] != 0:
+                log_msg += f" rl_policy_loss:{rl_losses['policy_loss']:.4f}"
+        
+        mylogger.info(log_msg)
 
         if epoch % val_epoch == 0:
 
-            val_loss = TrainEpoch(val_loader, model, optim, loss_fn, prompt_prefix, scaler, need_step=False)
+            val_result = TrainEpoch(
+                val_loader, model, optim, loss_fn, prompt_prefix, scaler, 
+                need_step=False,
+                use_adaptive_rl=use_adaptive_rl
+            )
+            val_loss = val_result['loss']
+            
             val_loss_line['x'].append(epoch)
             val_loss_line['y'].append(val_loss)
-            wandb.log({"Train Loss": train_loss, "Validation Loss": val_loss}, step=epoch)
+            
+            # Prepare wandb log dict
+            wandb_log = {
+                "Train Loss": train_loss, 
+                "Validation Loss": val_loss
+            }
+            if use_adaptive_rl and train_result['avg_tokens'] is not None:
+                wandb_log["Avg Tokens Used"] = train_result['avg_tokens']
+                wandb_log["RL Policy Loss"] = train_result['rl_losses']['policy_loss']
+                wandb_log["RL Entropy"] = train_result['rl_losses']['entropy']
+            
+            wandb.log(wandb_log, step=epoch)
 
             if val_loss < best_loss:
                 patience_count = 0
@@ -264,7 +331,9 @@ if __name__ == '__main__':
                     use_sep_token = args.use_sep_token, use_sep2_token = args.use_sep2_token, \
                     use_task_token = args.use_task_token, use_context_token = args.use_context_token, use_quality_token = args.use_quality_token, \
                     task_type = args.task, \
-                    use_sandglassAttn = args.sandglassAttn, dropout = args.dropout, trunc_k = args.trunc_k, t_dim = args.t_dim,wo_conloss=args.wo_conloss).cuda()
+                    use_sandglassAttn = args.sandglassAttn, dropout = args.dropout, trunc_k = args.trunc_k, t_dim = args.t_dim, wo_conloss=args.wo_conloss,
+                    use_adaptive_rl = getattr(args, 'use_adaptive_rl', False), 
+                    min_sag_tokens = getattr(args, 'min_sag_tokens', 4)).cuda()
     
     if not args.from_pretrained_model is None:
         model.load(args.from_pretrained_model)
