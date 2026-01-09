@@ -18,6 +18,7 @@ import random
 import string
 import wandb
 from datetime import datetime
+from prompts import PROMPTS, get_statistics
 wandb.login(key = 'c18f56f87b92b4296251b454a8556397e6153841')
 
 
@@ -235,9 +236,21 @@ if __name__ == '__main__':
     #distance_mx = cal_shortest_path_length(adj_mx, distance_mx)
 
     prompt_prefix = None
-    if not args.prompt_prefix is None:
+    if args.dataset[:6] in PROMPTS:
+        print(f"Generating prompt for {args.dataset}...")
+        
+        # Calculate statistics on TRAINING SET
+        train_stats_str = get_statistics(train_loader.dataset.history)
+        
+        # Format the prompt
+        prompt_prefix = PROMPTS[args.dataset[:6]].format(statistics=train_stats_str)
+        print("Generated Prompt:\n", prompt_prefix)
+    
+    # Allow override from args if specific prompt is given (optional, but good practice)
+    if args.prompt_prefix is not None:
         prompt_prefix = args.prompt_prefix
 
+    if prompt_prefix is not None:
         tokenizer = basemodel.gettokenizer()
 
         prompt_prefix = tokenizer(prompt_prefix, 

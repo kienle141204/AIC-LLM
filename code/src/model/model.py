@@ -156,6 +156,13 @@ class AICLLM(nn.Module):
                            features=input_dim ,
                            dropout=dropout
                            )
+            self.seg_anchor = SAG(sag_dim=sag_dim, 
+                                  sag_tokens=sag_tokens, 
+                                  emb_dim=self.emb_dim, 
+                                  sample_len=sample_len, 
+                                  features=input_dim ,
+                                  dropout=dropout
+                                  )
         elif self.use_sandglassAttn == 1:
             self.sag = PerceiverSAG(sag_dim=sag_dim, 
                                     sag_tokens=sag_tokens, 
@@ -172,6 +179,13 @@ class AICLLM(nn.Module):
                                         features=input_dim ,
                                         dropout=dropout
                                         )
+            self.seg_anchor = SetTransformerSAG(sag_dim=sag_dim, 
+                                  sag_tokens=sag_tokens, 
+                                  emb_dim=self.emb_dim, 
+                                  sample_len=sample_len, 
+                                  features=input_dim ,
+                                  dropout=dropout
+                                  )
         elif self.use_sandglassAttn == 3:
             self.sag = PoolingSAG(sag_dim=sag_dim, 
                                   sag_tokens=sag_tokens, 
@@ -180,7 +194,7 @@ class AICLLM(nn.Module):
                                   features=input_dim ,
                                   dropout=dropout
                                   )
-
+            
 
         self.wo_conloss = wo_conloss
         
@@ -274,8 +288,8 @@ class AICLLM(nn.Module):
             anchor_tokens = self.anchor_tokenizer(x_diff, te)
             st_embedding = torch.concat((anchor_tokens, st_embedding), dim=1)
 
-            anchor_tokens = self.anchor_tokenizer(ya, te)
-            st_embedding = torch.concat((anchor_tokens, st_embedding), dim=1)
+            # anchor_tokens = self.anchor_tokenizer(ya, te)
+            # st_embedding = torch.concat((anchor_tokens, st_embedding), dim=1)
         
         # Final sequence: [TASK] | [QUALITY] | [CONTEXT] | [SEP] | [ANCHOR] | [TIME] | [SPATIAL]
         sep = None

@@ -264,16 +264,12 @@ class SetTransformerSAG(nn.Module):
         h = self.pe(self.x_fc(x))  # (B, N, sag_dim)
         inducing = self.inducing_points.repeat(B, 1, 1)  # (B, K, sag_dim)
         
-        # Step 1: Inducing points attend to input
         h_ind, attn_weights = self.enc_mha1(query=self.pe(inducing), key=h, value=h)
         h_ind = self.enc_norm1(inducing + h_ind)
         
-        # Step 2: Self-attention among inducing points
         h_ind_self, _ = self.enc_self_attn(query=h_ind, key=h_ind, value=h_ind)
         h_ind = self.enc_norm2(h_ind + h_ind_self)
         
-        # Step 3: Input attends back to refined inducing points (optional, for richer output)
-        # Here we just output the inducing points
         out = self.enc_fc(h_ind)
         out = self.en_ln(out)
         

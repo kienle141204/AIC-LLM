@@ -70,4 +70,39 @@ class GPT2(BaseModel):
     def getembedding(self, input_ids):
         return self.llm.transformer.wte(input_ids)
 
+class LLaMA7B(BaseModel):
+    def __init__(self, lora, ln_grad, layers=None): 
+        super(LLaMA7B, self).__init__()
+        from transformers import AutoModel, AutoTokenizer as TransformerTokenizer
+
+        print("Loading LLaMA-7B model")
+        model_path = "meta-llama/Llama-2-7b-hf" 
+        try:
+             self.llm = AutoModel.from_pretrained(model_path, trust_remote_code=True, device_map='auto')
+             self.tokenizer = TransformerTokenizer.from_pretrained(model_path, trust_remote_code=True)
+        except:
+             print(f"Could not load {model_path}, trying open_llama_7b")
+             self.llm = AutoModel.from_pretrained("openlm-research/open_llama_7b", trust_remote_code=True, device_map='auto')
+             self.tokenizer = TransformerTokenizer.from_pretrained("openlm-research/open_llama_7b", trust_remote_code=True)
+        
+        self.dim = 4096
+
+        if not layers is None:
+            if hasattr(self.llm, 'layers'):
+                 self.llm.layers = self.llm.layers[:layers]
+        
+        # Freeze
+        for name, param in self.llm.named_parameters():
+            param.requires_grad_(False)
+            
+    def forward(self, input: torch.FloatTensor, attention_mask=None):
+        output = self.llm(inputs_embeds=input, attention_mask=attention_mask, output_hidden_states=True).hidden_states[-1]
+        return output
+    
+    def gettokenizer(self):
+        return self.tokenizer
+
+    def getembedding(self, input_ids):
+        return self.llm.get_input_embeddings()(input_ids)
+
 
