@@ -203,6 +203,8 @@ def getllm(args):
         basemodel = GPT2(args.lora, args.ln_grad, args.llm_layers)
     elif args.model == 'llama7b':
         basemodel = LLaMA7B(args.lora, args.ln_grad, args.llm_layers)
+    else:
+        raise ValueError(f"Model '{args.model}' is not supported. Please use --model 'gpt2' or 'llama7b'.")
         
     return basemodel
 

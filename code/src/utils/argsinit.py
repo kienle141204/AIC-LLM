@@ -19,7 +19,7 @@ def AddModelArgs(parser):
     parser.add_argument("--time_token", action="store_true")
 
 
-    parser.add_argument("--model", default="phi2" ,type=str)
+    parser.add_argument("--model", default="gpt2" ,type=str)
 
     parser.add_argument("--llm_layers", default=None, type=int)
 
