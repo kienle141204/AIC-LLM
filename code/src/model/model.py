@@ -192,7 +192,7 @@ class AICLLM(nn.Module):
 
         self.layer_norm = nn.LayerNorm(self.emb_dim)
     
-    def forward(self, x: torch.FloatTensor, xa: torch.FloatTensor, timestamp: torch.Tensor, prompt_prefix: Optional[torch.Tensor]):
+    def forward(self, x: torch.FloatTensor, xa: torch.FloatTensor, ya: torch.FloatTensor, timestamp: torch.Tensor, prompt_prefix: Optional[torch.Tensor]):
         B, N, TF = x.shape
         other_loss = []
         
@@ -272,6 +272,9 @@ class AICLLM(nn.Module):
             st_embedding = torch.concat((ad_tokens, st_embedding), dim=1)
         elif self.use_anchor_diff_token == 2:
             anchor_tokens = self.anchor_tokenizer(x_diff, te)
+            st_embedding = torch.concat((anchor_tokens, st_embedding), dim=1)
+
+            anchor_tokens = self.anchor_tokenizer(ya, te)
             st_embedding = torch.concat((anchor_tokens, st_embedding), dim=1)
         
         # Final sequence: [TASK] | [QUALITY] | [CONTEXT] | [SEP] | [ANCHOR] | [TIME] | [SPATIAL]

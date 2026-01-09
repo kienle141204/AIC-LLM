@@ -39,13 +39,14 @@ def TrainEpoch(loader, model, optim, loss_fn, prompt_prefix, scaler, need_step: 
     loss_item = 0
     count = 0
 
-    for input, input_anchor, target, timestamp in loader:  
+    for input, input_anchor, target, target_avg, timestamp in loader:  
         # (B,T,N,F)
         B, T, N, F = input.shape
         input = input.permute(0,2,1,3).contiguous().view(B,N,-1)
         input_anchor = input_anchor.permute(0,2,1,3).contiguous().view(B,N,-1)
+        target_avg = target_avg.permute(0,2,1,3).contiguous().view(B,N,-1)
 
-        predict, other_loss = model(input, input_anchor, timestamp, prompt_prefix)
+        predict, other_loss = model(input, input_anchor, target_avg, timestamp, prompt_prefix)
 
         predict = predict.view(B, N, -1, args.output_dim).permute(0, 2, 1, 3).contiguous()  #(B, T, N, F)
         predict = scaler.inverse_transform(predict)
@@ -79,13 +80,14 @@ def TestEpoch(loader, model, prompt_prefix, scaler, save=False):
         targets = []
         predicts = []
 
-        for input, input_anchor, target, timestamp in loader:
+        for input, input_anchor, target, target_avg, timestamp in loader:
             B, T, N, F = input.shape
 
             input = input.permute(0,2,1,3).contiguous().view(B,N,-1)
             input_anchor = input_anchor.permute(0,2,1,3).contiguous().view(B,N,-1)
+            target_avg = target_avg.permute(0,2,1,3).contiguous().view(B,N,-1)
 
-            predict, _ = model(input, input_anchor, timestamp, prompt_prefix)
+            predict, _ = model(input, input_anchor, target_avg, timestamp, prompt_prefix)
 
             predict = predict.view(B, N, -1, args.output_dim).permute(0, 2, 1, 3).contiguous()
 
