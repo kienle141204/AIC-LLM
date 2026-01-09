@@ -156,7 +156,7 @@ class AICLLM(nn.Module):
                            features=input_dim ,
                            dropout=dropout
                            )
-            self.seg_anchor = SAG(sag_dim=sag_dim, 
+            self.sag_anchor = SAG(sag_dim=sag_dim, 
                                   sag_tokens=sag_tokens, 
                                   emb_dim=self.emb_dim, 
                                   sample_len=sample_len, 
@@ -179,7 +179,7 @@ class AICLLM(nn.Module):
                                         features=input_dim ,
                                         dropout=dropout
                                         )
-            self.seg_anchor = SetTransformerSAG(sag_dim=sag_dim, 
+            self.sag_anchor = SetTransformerSAG(sag_dim=sag_dim, 
                                   sag_tokens=sag_tokens, 
                                   emb_dim=self.emb_dim, 
                                   sample_len=sample_len, 
@@ -287,6 +287,24 @@ class AICLLM(nn.Module):
         elif self.use_anchor_diff_token == 2:
             anchor_tokens = self.anchor_tokenizer(x_diff, te)
             st_embedding = torch.concat((anchor_tokens, st_embedding), dim=1)
+            
+            # anchor_spatio
+            # Use node_tokenizer to project xa to emb_dim
+            xa_spatial_tokens = self.node_tokenizer(xa, te, ne)
+            if self.topological_sort_node:
+                xa_spatial_tokens = xa_spatial_tokens[:, self.node_order, :]
+                
+            anchor_spatio, attn_weights_1 = self.sag_anchor.encode(xa_spatial_tokens)
+            st_embedding = torch.concat((anchor_spatio, st_embedding), dim=1)
+            
+            if attn_weights_1 is not None:
+                scale = attn_weights_1.sum(dim=1)    #(B,N)
+
+                sag_score = torch.einsum('bmn,bhn->bhm',self.adj_mx[None,:,:],attn_weights_1)
+                other_loss.append(-((sag_score*attn_weights_1-attn_weights_1*attn_weights_1)).sum(dim=2).mean()*10)
+
+                Dirichlet = torch.distributions.dirichlet.Dirichlet(self.alpha)
+                other_loss.append(-Dirichlet.log_prob(torch.softmax(scale,dim=-1)).sum())
 
             # anchor_tokens = self.anchor_tokenizer(ya, te)
             # st_embedding = torch.concat((anchor_tokens, st_embedding), dim=1)

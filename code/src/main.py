@@ -7,7 +7,7 @@ import os
 from utils.utils import get_time_str,check_dir,draw_loss_line,draw_mape_node,get_randmask,get_block_mask, cal_shortest_path_length
 from logger import getlogger
 from model.model import AICLLM
-from model.llm import GPT2
+from model.llm import GPT2, LLaMA7B
 from data.data import load_data
 from utils.metrics import MAE_torch,RMSE_torch,MAPE_torch,MAPE_torch_node,cal_metrics
 from utils.argsinit import InitArgs
@@ -201,7 +201,9 @@ def Train(args, mylogger, model, prompt_prefix, scaler):
 def getllm(args):
     if args.model == 'gpt2':
         basemodel = GPT2(args.lora, args.ln_grad, args.llm_layers)
-
+    elif args.model == 'llama7b':
+        basemodel = LLaMA7B(args.lora, args.ln_grad, args.llm_layers)
+        
     return basemodel
 
 if __name__ == '__main__':

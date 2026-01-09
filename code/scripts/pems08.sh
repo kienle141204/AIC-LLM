@@ -3,7 +3,7 @@ python main.py \
     --data_path '../../data/traffic/PEMS08/PEMS08.npz' \
     --adj_filename ../../data/traffic/PEMS08/PEMS08.csv \
     --dataset PEMS08FLOW \
-    --desc EMS08_pre\ \
+    --desc new_instruc_EMS08_pre \
     --sample_len 12 \
     --predict_len 12 \
     --train_ratio 0.6 \
@@ -27,9 +27,9 @@ python main.py \
     --trunc_k 64 \
     --weight_decay 0 \
     --task prediction \
-    --sandglassAttn 1 \
+    --sandglassAttn 2 \
     --sag_dim 128 \
-    --sag_tokens 128 \
+    --sag_tokens 46 \
     --input_dim 1\ \
     --output_dim 1 \
     --use_anchor_diff_token 2 \
