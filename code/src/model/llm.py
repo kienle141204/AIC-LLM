@@ -73,19 +73,19 @@ class GPT2(BaseModel):
 class LLaMA7B(BaseModel):
     def __init__(self, lora, ln_grad, layers=None): 
         super(LLaMA7B, self).__init__()
-        from transformers import LlamaConfig, LlamaModel, LlamaTokenizer
+        from transformers import AutoConfig, AutoModel, AutoTokenizer
 
         print("Loading LLaMA-7B model")
         model_name = 'huggyllama/llama-7b'
         
-        self.llama_config = LlamaConfig.from_pretrained(model_name)
+        self.llama_config = AutoConfig.from_pretrained(model_name)
         if layers is not None:
              self.llama_config.num_hidden_layers = layers
         self.llama_config.output_attentions = True
         self.llama_config.output_hidden_states = True
         
         try:
-            self.llm = LlamaModel.from_pretrained(
+            self.llm = AutoModel.from_pretrained(
                 model_name,
                 trust_remote_code=True,
                 local_files_only=True,
@@ -93,7 +93,7 @@ class LLaMA7B(BaseModel):
             )
         except EnvironmentError:  # downloads model from HF is not already done
             print("Local model files not found. Attempting to download...")
-            self.llm = LlamaModel.from_pretrained(
+            self.llm = AutoModel.from_pretrained(
                 model_name,
                 trust_remote_code=True,
                 local_files_only=False,
@@ -101,14 +101,14 @@ class LLaMA7B(BaseModel):
             )
             
         try:
-            self.tokenizer = LlamaTokenizer.from_pretrained(
+            self.tokenizer = AutoTokenizer.from_pretrained(
                 model_name,
                 trust_remote_code=True,
                 local_files_only=True
             )
         except EnvironmentError:  # downloads the tokenizer from HF if not already done
             print("Local tokenizer files not found. Attempting to download them..")
-            self.tokenizer = LlamaTokenizer.from_pretrained(
+            self.tokenizer = AutoTokenizer.from_pretrained(
                 model_name,
                 trust_remote_code=True,
                 local_files_only=False
