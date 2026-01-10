@@ -216,7 +216,7 @@ class AICLLM(nn.Module):
         ne = self.node_embedding()
 
         # spatial tokenizer 
-        spatial_tokens = self.node_tokenizer(x_spatial, te, ne)  # (B, N, emb_dim)
+        spatial_tokens = self.node_tokenizer(x, te, ne)  # (B, N, emb_dim)
         if self.topological_sort_node:
             spatial_tokens = spatial_tokens[:, self.node_order, :]
         
