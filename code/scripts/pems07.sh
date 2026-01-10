@@ -16,12 +16,10 @@ python main.py \
     --causal 0 \
     --model gpt2 \
     --patience 50 \
-    --ln_grad \
-    --lora \
     --t_dim 64 \
     --node_emb_dim 64 \
     --node_embedding \
-    --llm_layers 3 \
+    --llm_layers 2 \
     --time_token \
     --dropout 0.05 \
     --trunc_k 64 \
@@ -34,7 +32,7 @@ python main.py \
     --output_dim 1 \
     --use_anchor_diff_token 2 \
     --use_diff 0 \
-    --use_sep_token \
-    --use_task_token \
-    --use_context_token \
-    --use_quality_token
+    # --use_sep_token \
+    # --use_task_token \
+    # --use_context_token \
+    # --use_quality_token

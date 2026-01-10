@@ -148,7 +148,7 @@ class AICLLM(nn.Module):
         self.time_embedding = TimeEmbedding(t_dim=t_dim)
         
         # Sandglass Attn
-        if self.use_sandglassAttn == 0:
+        if self.use_sandglassAttn == 4:
             self.sag = SAG(sag_dim=sag_dim, 
                            sag_tokens=sag_tokens, 
                            emb_dim=self.emb_dim, 
