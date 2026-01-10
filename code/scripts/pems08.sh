@@ -32,10 +32,10 @@ python main.py \
     --output_dim 1 \
     --use_anchor_diff_token 2 \
     --use_diff 0 \
-    --use_sep_token \
-    --use_task_token \
-    --use_context_token \
-    --use_quality_token
+    # --use_sep_token \
+    # --use_task_token \
+    # --use_context_token \
+    # --use_quality_token
 
 # python main.py \
 #     --data_path '../../data/traffic/PEMS08/PEMS08.npz' \

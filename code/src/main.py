@@ -211,7 +211,7 @@ def getllm(args):
 if __name__ == '__main__':
     
     args = InitArgs()
-    wandb.init(project=f"AIC-LLM_{args.dataset}", name=f"{args.desc}_{datetime.now().strftime('%Y-%m-%d %H:%M')}", config=vars(args))
+    wandb.init(project=f"AIC-LLM_{args.dataset}", name=f"{args.desc}_{datetime.now().strftime('%Y-%m-%d_%H-%M')}", config=vars(args))
 
     output_len = args.predict_len
     window_size = args.sample_len + args.predict_len

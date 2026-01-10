@@ -47,7 +47,7 @@ def AddModelArgs(parser):
 
 def AddDataArgs(parser):
 
-    parser.add_argument("--dataset" ,type=str)
+    parser.add_argument("--dataset" ,type=str, default="pems04")
 
     parser.add_argument("--data_path" ,type=str)
 
