@@ -163,14 +163,14 @@ class AICLLM(nn.Module):
                                   features=input_dim ,
                                   dropout=dropout
                                   )
-        elif self.use_sandglassAttn == 1:
-            self.sag = PerceiverSAG(sag_dim=sag_dim, 
-                                    sag_tokens=sag_tokens, 
-                                    emb_dim=self.emb_dim, 
-                                    sample_len=sample_len, 
-                                    features=input_dim ,
-                                    dropout=dropout
-                                    )
+        # elif self.use_sandglassAttn == 1:
+        #     self.sag = PerceiverSAG(sag_dim=sag_dim, 
+        #                             sag_tokens=sag_tokens, 
+        #                             emb_dim=self.emb_dim, 
+        #                             sample_len=sample_len, 
+        #                             features=input_dim ,
+        #                             dropout=dropout
+        #                             )
         elif self.use_sandglassAttn == 2:
             self.sag = SetTransformerSAG(sag_dim=sag_dim, 
                                         sag_tokens=sag_tokens, 
@@ -186,14 +186,14 @@ class AICLLM(nn.Module):
                                   features=input_dim ,
                                   dropout=dropout
                                   )
-        elif self.use_sandglassAttn == 3:
-            self.sag = PoolingSAG(sag_dim=sag_dim, 
-                                  sag_tokens=sag_tokens, 
-                                  emb_dim=self.emb_dim, 
-                                  sample_len=sample_len,    
-                                  features=input_dim ,
-                                  dropout=dropout
-                                  )
+        # elif self.use_sandglassAttn == 3:
+        #     self.sag = PoolingSAG(sag_dim=sag_dim, 
+        #                           sag_tokens=sag_tokens, 
+        #                           emb_dim=self.emb_dim, 
+        #                           sample_len=sample_len,    
+        #                           features=input_dim ,
+        #                           dropout=dropout
+        #                           )
             
 
         self.wo_conloss = wo_conloss
