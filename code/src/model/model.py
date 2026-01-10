@@ -210,41 +210,10 @@ class AICLLM(nn.Module):
         B, N, TF = x.shape
         other_loss = []
         
-        x_spatial = x
-        if self.use_diff == 1:
-            x_diff = x - xa
-        else:
-            x_diff = xa
 
         timestamp = timestamp[:, :self.sample_len, :]
         te = self.time_embedding(timestamp) 
         ne = self.node_embedding()
-
-        special_tokens_list = []
-        
-        # task token
-        if self.use_task_token:
-            task_token = self.task_token_forecast.repeat(B, 1, 1)
-            special_tokens_list.append(task_token)
-        
-        # quality token (based on diff with anchor)
-        if self.use_quality_token:
-            diff = (x - xa).abs().mean(dim=(1, 2), keepdim=True)  # (B, 1, 1)
-            diff = diff.squeeze(-1)  # (B, 1)
-            
-            quality_score = self.quality_scorer(diff)  # (B, 1)
-            
-            quality_token = (quality_score.unsqueeze(-1) * self.quality_token_high + 
-                           (1 - quality_score.unsqueeze(-1)) * self.quality_token_low)
-            quality_token = quality_token.repeat(1, 1, 1)  # (B, 1, emb_dim)
-            special_tokens_list.append(quality_token)
-        
-        # context token
-        if self.use_context_token:
-            x_context = x.mean(dim=1)  # (B, TF)
-            context_embedding = self.context_aggregator(x_context)  # (B, emb_dim)
-            context_token = self.context_token.repeat(B, 1, 1) + context_embedding.unsqueeze(1)
-            special_tokens_list.append(context_token)
 
         # spatial tokenizer 
         spatial_tokens = self.node_tokenizer(x_spatial, te, ne)  # (B, N, emb_dim)
@@ -252,7 +221,6 @@ class AICLLM(nn.Module):
             spatial_tokens = spatial_tokens[:, self.node_order, :]
         
         st_embedding = spatial_tokens
-        s_num = N
         s_num = self.sag_tokens
         
         # Precoder
@@ -277,47 +245,34 @@ class AICLLM(nn.Module):
         time_tokens_idx = st_embedding.shape[1]
         st_embedding = torch.concat((time_tokens, st_embedding), dim=1)
 
-        if self.use_sep2_token:
-            sep2_token = self.sep2_token.repeat(B, 1, 1)
-            st_embedding = torch.concat((sep2_token, st_embedding), dim=1)  
+        #### ANCHOR ##########
+        spatial_anchor = self.node_tokenizer(xa, te, ne)
+        if self.topological_sort_node:
+            spatial_anchor = spatial_anchor[:, self.node_order, :]
+        
+        if self.use_sandglassAttn:
+            spatial_anchor, antt_weights_1 = self.sag.encode(spatial_anchor)
+        else:
+            spatial_anchor, antt_weights_1 = self.precoder(spatial_anchor)
+        
+        st_embedding = torch.concat((spatial_anchor, st_embedding), dim=1)
+        
+        if self.use_sandglassAttn and not self.wo_conloss:
+            if antt_weights_1 is not None:
+                scale = antt_weights_1.sum(dim=1)    #(B,N)
 
-        if self.use_anchor_diff_token == 1:
-            ad_tokens = self.anchor_diff_tokenizer(x, xa, te)
-            st_embedding = torch.concat((ad_tokens, st_embedding), dim=1)
-        elif self.use_anchor_diff_token == 2:
-            anchor_tokens = self.anchor_tokenizer(x_diff, te)
-            st_embedding = torch.concat((anchor_tokens, st_embedding), dim=1)
-            
-            # anchor_spatio
-            # Use node_tokenizer to project xa to emb_dim
-            xa_spatial_tokens = self.node_tokenizer(xa, te, ne)
-            if self.topological_sort_node:
-                xa_spatial_tokens = xa_spatial_tokens[:, self.node_order, :]
-                
-            anchor_spatio, attn_weights_1 = self.sag_anchor.encode(xa_spatial_tokens)
-            st_embedding = torch.concat((anchor_spatio, st_embedding), dim=1)
-            
-            if attn_weights_1 is not None:
-                scale = attn_weights_1.sum(dim=1)    #(B,N)
-
-                sag_score = torch.einsum('bmn,bhn->bhm',self.adj_mx[None,:,:],attn_weights_1)
-                other_loss.append(-((sag_score*attn_weights_1-attn_weights_1*attn_weights_1)).sum(dim=2).mean()*10)
+                sag_score = torch.einsum('bmn,bhn->bhm',self.adj_mx[None,:,:],antt_weights_1)
+                other_loss.append(-((sag_score*antt_weights_1-antt_weights_1*antt_weights_1)).sum(dim=2).mean()*10)
 
                 Dirichlet = torch.distributions.dirichlet.Dirichlet(self.alpha)
                 other_loss.append(-Dirichlet.log_prob(torch.softmax(scale,dim=-1)).sum())
+        
+        time_anchor = self.time_tokenizer(xa, te)
+        time_anchor_idx = st_embedding.shape[1]
+        st_embedding = torch.concat((time_anchor, st_embedding), dim=1)
 
-            # anchor_tokens = self.anchor_tokenizer(ya, te)
-            # st_embedding = torch.concat((anchor_tokens, st_embedding), dim=1)
-        
-        # Final sequence: [TASK] | [QUALITY] | [CONTEXT] | [SEP] | [ANCHOR] | [TIME] | [SPATIAL]
-        sep = None
-        if self.use_sep_token:
-            sep = self.sep_token.repeat(B, 1, 1)
-            st_embedding = torch.concat((sep, st_embedding), dim=1)
-        
-        if len(special_tokens_list) > 0:
-            special_tokens = torch.concat(special_tokens_list, dim=1)  # (B, num_special, emb_dim)
-            st_embedding = torch.concat([special_tokens, st_embedding], dim=1)
+        st_embedding = torch.concat((time_anchor, st_embedding), dim=1)
+        ############################
         
         if prompt_prefix is not None:
             prompt_len,_ = prompt_prefix.shape
