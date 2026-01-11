@@ -25,7 +25,7 @@ python main.py \
     --trunc_k 64 \
     --weight_decay 0 \
     --task prediction \
-    --sandglassAttn \
+    --sandglassAttn 2 \
     --sag_dim 128 \
     --sag_tokens 128 \
     --input_dim 1\
