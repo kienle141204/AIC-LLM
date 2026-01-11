@@ -271,7 +271,7 @@ class AICLLM(nn.Module):
         time_anchor_idx = st_embedding.shape[1]
         st_embedding = torch.concat((time_anchor, st_embedding), dim=1)
 
-        st_embedding = torch.concat((time_anchor, st_embedding), dim=1)
+        # st_embedding = torch.concat((time_anchor, st_embedding), dim=1)
         ############################
         
         if prompt_prefix is not None:
