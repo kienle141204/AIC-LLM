@@ -6,6 +6,7 @@ from typing import Optional
 from model.sandglassAttn import SAG, PerceiverSAG, SetTransformerSAG, PoolingSAG
 from model.embedding import TimeEmbedding, NodeEmbedding
 from model.tokenizer import AnchorDiffTokenizer, Time2Token, Node2Token
+from prompts import  ANCHOR_DATA_INSTRUCTION, CURRENT_DATA_INSTRUCTION
 
 class DecodingLayer(nn.Module):
     def __init__(self, input_dim, emb_dim, output_dim):
@@ -245,6 +246,16 @@ class AICLLM(nn.Module):
         time_tokens_idx = st_embedding.shape[1]
         st_embedding = torch.concat((time_tokens, st_embedding), dim=1)
 
+        # current instruction
+        current_instruction = CURRENT_DATA_INSTRUCTION
+        tokenizer = basemodel.gettokenizer()
+
+        current_instruction = tokenizer(current_instruction, 
+                        return_tensors="pt", return_attention_mask=False)
+        current_instruction = current_instruction['input_ids'].cuda().view(-1,1)
+
+        st_embedding = torch.concat((current_instruction, st_embedding), dim=1)
+
         #### ANCHOR ##########
         spatial_anchor = self.node_tokenizer(xa, te, ne)
         if self.topological_sort_node:
@@ -270,6 +281,14 @@ class AICLLM(nn.Module):
         time_anchor = self.time_tokenizer(xa, te)
         time_anchor_idx = st_embedding.shape[1]
         st_embedding = torch.concat((time_anchor, st_embedding), dim=1)
+
+        # anchor instruction
+        anchor_instruction = ANCHOR_DATA_INSTRUCTION
+        anchor_instruction = tokenizer(anchor_instruction, 
+                        return_tensors="pt", return_attention_mask=False)
+        anchor_instruction = anchor_instruction['input_ids'].cuda().view(-1,1)
+
+        st_embedding = torch.concat((anchor_instruction, st_embedding), dim=1)
 
         # st_embedding = torch.concat((time_anchor, st_embedding), dim=1)
         ############################

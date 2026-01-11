@@ -19,13 +19,13 @@ python main.py \
     --t_dim 64 \
     --node_emb_dim 64 \
     --node_embedding \
-    --llm_layers 2 \
+    --llm_layers 3 \
     --time_token \
     --dropout 0.05 \
     --trunc_k 64 \
     --weight_decay 0 \
     --task prediction \
-    --sandglassAttn \
+    --sandglassAttn 2 \
     --sag_dim 128 \
     --sag_tokens 128 \
     --input_dim 1\
@@ -59,7 +59,7 @@ python main.py \
 #     --t_dim 64 \
 #     --node_emb_dim 64 \
 #     --node_embedding \
-#     --llm_layers 2 \
+#     --llm_layers 3 \
 #     --time_token \
 #     --dropout 0.05 \
 #     --trunc_k 64 \
@@ -94,7 +94,7 @@ python main.py \
 #     --t_dim 64 \
 #     --node_emb_dim 64 \
 #     --node_embedding \
-#     --llm_layers 2 \
+#     --llm_layers 3 \
 #     --time_token \
 #     --dropout 0.05 \
 #     --trunc_k 64 \

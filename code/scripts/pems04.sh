@@ -19,7 +19,7 @@ python main.py \
     --t_dim 64 \
     --node_emb_dim 64 \
     --node_embedding \
-    --llm_layers 2 \
+    --llm_layers 3 \
     --time_token \
     --dropout 0.05 \
     --trunc_k 64 \
@@ -60,7 +60,7 @@ python main.py \
 #     --t_dim 64 \
 #     --node_emb_dim 64 \
 #     --node_embedding \
-#     --llm_layers 2 \
+#     --llm_layers 3 \
 #     --time_token \
 #     --dropout 0.05 \
 #     --trunc_k 64 \
@@ -95,7 +95,7 @@ python main.py \
 #     --t_dim 64 \
 #     --node_emb_dim 64 \
 #     --node_embedding \
-#     --llm_layers 2 \
+#     --llm_layers 3 \
 #     --time_token \
 #     --dropout 0.05 \
 #     --trunc_k 64 \
