@@ -118,7 +118,7 @@ class Qwen3(BaseModel):
                     param.requires_grad_(True)
     
     def forward(self, input: torch.FloatTensor, attention_mask=None):
-        output = self.llm(inputs_embeds=input, attention_mask=attention_mask)
+        output = self.llm(inputs_embeds=input, attention_mask=attention_mask, output_hidden_states=True)
         return output.hidden_states[-1]
     
     def gettokenizer(self):
@@ -226,8 +226,8 @@ class LLaMA7B(BaseModel):
             param.requires_grad_(False)
             
     def forward(self, input: torch.FloatTensor, attention_mask=None):
-        output = self.llm(inputs_embeds=input, attention_mask=attention_mask).hidden_states[-1]
-        return output
+        output = self.llm(inputs_embeds=input, attention_mask=attention_mask, output_hidden_states=True)
+        return output.hidden_states[-1]
     
     def gettokenizer(self):
         return self.tokenizer
