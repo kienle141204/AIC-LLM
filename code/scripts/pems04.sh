@@ -3,7 +3,7 @@ python main.py \
     --data_path '../../data/traffic/PEMS04/PEMS04.npz' \
     --adj_filename ../../data/traffic/PEMS04/PEMS04.csv \
     --dataset PEMS04FLOW \
-    --desc use_anchor_PEMS04_pre\
+    --desc PEMS04_pre\
     --sample_len 12 \
     --predict_len 12 \
     --train_ratio 0.6 \
@@ -19,13 +19,13 @@ python main.py \
     --t_dim 64 \
     --node_emb_dim 64 \
     --node_embedding \
-    --llm_layers 2 \
+    --llm_layers 3 \
     --time_token \
     --dropout 0.05 \
     --trunc_k 64 \
     --weight_decay 0 \
     --task prediction \
-    --sandglassAttn 4 \
+    --sandglassAttn 2 \
     --sag_dim 128 \
     --sag_tokens 128 \
     --input_dim 1\
@@ -42,7 +42,7 @@ python main.py \
     --data_path '../../data/traffic/PEMS04/PEMS04.npz' \
     --adj_filename ../../data/traffic/PEMS04/PEMS04.csv \
     --dataset PEMS04FLOW \
-    --desc use_anchor_PEMS04_pre\
+    --desc ftllm_PEMS04_pre\
     --sample_len 12 \
     --predict_len 12 \
     --train_ratio 0.6 \
@@ -54,23 +54,26 @@ python main.py \
     --lr 0.001 \
     --causal 0 \
     --model gpt2 \
+    --lora \
+    --ln_grad \
     --patience 50 \
     --t_dim 64 \
     --node_emb_dim 64 \
     --node_embedding \
-    --llm_layers 2 \
+    --llm_layers 3 \
     --time_token \
     --dropout 0.05 \
     --trunc_k 64 \
     --weight_decay 0 \
     --task prediction \
-    --sandglassAttn 4 \
+    --sandglassAttn 2 \
     --sag_dim 128 \
     --sag_tokens 128 \
     --input_dim 1\
     --output_dim 1 \
     --use_anchor_diff_token 2 \
     --use_diff 0 \
+    --user_instruction
     
 
 # python main.py \
