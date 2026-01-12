@@ -14,7 +14,7 @@ python main.py \
     --batch_size 64 \
     --lr 0.001 \
     --causal 0 \
-    --model gpt2 \
+    --model qwen3 \
     --patience 50 \
     --t_dim 64 \
     --node_emb_dim 64 \
@@ -53,7 +53,7 @@ python main.py \
     --batch_size 64 \
     --lr 0.001 \
     --causal 0 \
-    --model gpt2 \
+    --model qwen3 \
     --lora \
     --ln_grad \
     --patience 50 \
@@ -91,7 +91,7 @@ python main.py \
 #     --batch_size 64\ \
 #     --lr 0.001 \
 #     --causal 0 \
-#     --model gpt2 \
+#     --model qwen3 \
 #     --patience 50 \
 #     --ln_grad \
 #     --lora \
@@ -126,7 +126,7 @@ python main.py \
 #     --batch_size 64\ \
 #     --lr 0.001 \
 #     --causal 0 \
-#     --model gpt2 \
+#     --model qwen3 \
 #     --patience 50 \
 #     --ln_grad \
 #     --lora \
