@@ -3,7 +3,7 @@ python main.py \
     --data_path '../../data/traffic/PEMS08/PEMS08.npz' \
     --adj_filename ../../data/traffic/PEMS08/PEMS08.csv \
     --dataset PEMS08FLOW \
-    --desc xa_PEMS08_pre\ \
+    --desc new_instruc_EMS08_pre \
     --sample_len 12 \
     --predict_len 12 \
     --train_ratio 0.6 \
@@ -16,8 +16,6 @@ python main.py \
     --causal 0 \
     --model gpt2 \
     --patience 50 \
-    --ln_grad \
-    --lora \
     --t_dim 64 \
     --node_emb_dim 64 \
     --node_embedding \
@@ -27,17 +25,17 @@ python main.py \
     --trunc_k 64 \
     --weight_decay 0 \
     --task prediction \
-    --sandglassAttn \
+    --sandglassAttn 2 \
     --sag_dim 128 \
-    --sag_tokens 128 \
+    --sag_tokens 46 \
     --input_dim 1\ \
     --output_dim 1 \
     --use_anchor_diff_token 2 \
     --use_diff 0 \
-    --use_sep_token \
-    --use_task_token \
-    --use_context_token \
-    --use_quality_token
+    # --use_sep_token \
+    # --use_task_token \
+    # --use_context_token \
+    # --use_quality_token
 
 # python main.py \
 #     --data_path '../../data/traffic/PEMS08/PEMS08.npz' \

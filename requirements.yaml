@@ -1,4 +1,4 @@
-name: stllm_test
+name: stllm-test1
 channels:
   - pytorch
   - nvidia

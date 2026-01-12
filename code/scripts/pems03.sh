@@ -3,7 +3,7 @@ python main.py \
     --data_path '../../data/traffic/PEMS03/PEMS03.npz' \
     --adj_filename ../../data/traffic/PEMS03/PEMS03.csv \
     --dataset PEMS03FLOW \
-    --desc sep_PEMS03_pre\
+    --desc PEMS03_pre\
     --sample_len 12 \
     --predict_len 12 \
     --train_ratio 0.6 \
@@ -16,8 +16,6 @@ python main.py \
     --causal 0 \
     --model gpt2 \
     --patience 50 \
-    --ln_grad \
-    --lora \
     --t_dim 64 \
     --node_emb_dim 64 \
     --node_embedding \
@@ -27,17 +25,18 @@ python main.py \
     --trunc_k 64 \
     --weight_decay 0 \
     --task prediction \
-    --sandglassAttn \
+    --sandglassAttn 2 \
     --sag_dim 128 \
     --sag_tokens 128 \
     --input_dim 1\
     --output_dim 1 \
     --use_anchor_diff_token 2 \
     --use_diff 0 \
-    --use_task_token \
-    --use_context_token \
-    --use_quality_token \
-    --use_sep_token
+    --user_instruction \
+    # --use_task_token \
+    # --use_context_token \
+    # --use_quality_token \
+    # --use_sep_token
 
 # python main.py \
 #     --data_path '../../data/traffic/PEMS03/PEMS03.npz' \

@@ -19,7 +19,7 @@ def AddModelArgs(parser):
     parser.add_argument("--time_token", action="store_true")
 
 
-    parser.add_argument("--model", default="phi2" ,type=str)
+    parser.add_argument("--model", default="gpt2" ,type=str)
 
     parser.add_argument("--llm_layers", default=None, type=int)
 
@@ -31,7 +31,7 @@ def AddModelArgs(parser):
 
     parser.add_argument("--node_emb_dim", default=128, type=int)
 
-    parser.add_argument("--sandglassAttn", action="store_true")
+    parser.add_argument("--sandglassAttn", type=int, default=0)
     parser.add_argument("--wo_conloss" , action="store_true")
     parser.add_argument("--sag_dim", default=128, type=int)
     parser.add_argument("--sag_tokens", default=128, type=int)
@@ -42,12 +42,13 @@ def AddModelArgs(parser):
     parser.add_argument("--use_task_token", action="store_true", help="Enable task type token")
     parser.add_argument("--use_context_token", action="store_true", help="Enable global context summary token")
     parser.add_argument("--use_quality_token", action="store_true", help="Enable input quality assessment token")
+    parser.add_argument("--user_instruction",action="store_true")
 
 
 
 def AddDataArgs(parser):
 
-    parser.add_argument("--dataset" ,type=str)
+    parser.add_argument("--dataset" ,type=str, default="pems04")
 
     parser.add_argument("--data_path" ,type=str)
 

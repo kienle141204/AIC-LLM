@@ -7,7 +7,7 @@ import os
 from utils.utils import get_time_str,check_dir,draw_loss_line,draw_mape_node,get_randmask,get_block_mask, cal_shortest_path_length
 from logger import getlogger
 from model.model import AICLLM
-from model.llm import GPT2
+from model.llm import GPT2, LLaMA7B
 from data.data import load_data
 from utils.metrics import MAE_torch,RMSE_torch,MAPE_torch,MAPE_torch_node,cal_metrics
 from utils.argsinit import InitArgs
@@ -18,6 +18,7 @@ import random
 import string
 import wandb
 from datetime import datetime
+from prompts import PROMPTS, get_statistics
 wandb.login(key = 'c18f56f87b92b4296251b454a8556397e6153841')
 
 
@@ -39,13 +40,14 @@ def TrainEpoch(loader, model, optim, loss_fn, prompt_prefix, scaler, need_step: 
     loss_item = 0
     count = 0
 
-    for input, input_anchor, target, timestamp in loader:  
+    for input, input_anchor, target, target_avg, timestamp in loader:  
         # (B,T,N,F)
         B, T, N, F = input.shape
         input = input.permute(0,2,1,3).contiguous().view(B,N,-1)
         input_anchor = input_anchor.permute(0,2,1,3).contiguous().view(B,N,-1)
+        target_avg = target_avg.permute(0,2,1,3).contiguous().view(B,N,-1)
 
-        predict, other_loss = model(input, input_anchor, timestamp, prompt_prefix)
+        predict, other_loss = model(input, input_anchor, target_avg, timestamp, prompt_prefix)
 
         predict = predict.view(B, N, -1, args.output_dim).permute(0, 2, 1, 3).contiguous()  #(B, T, N, F)
         predict = scaler.inverse_transform(predict)
@@ -79,13 +81,14 @@ def TestEpoch(loader, model, prompt_prefix, scaler, save=False):
         targets = []
         predicts = []
 
-        for input, input_anchor, target, timestamp in loader:
+        for input, input_anchor, target, target_avg, timestamp in loader:
             B, T, N, F = input.shape
 
             input = input.permute(0,2,1,3).contiguous().view(B,N,-1)
             input_anchor = input_anchor.permute(0,2,1,3).contiguous().view(B,N,-1)
+            target_avg = target_avg.permute(0,2,1,3).contiguous().view(B,N,-1)
 
-            predict, _ = model(input, input_anchor, timestamp, prompt_prefix)
+            predict, _ = model(input, input_anchor, target_avg, timestamp, prompt_prefix)
 
             predict = predict.view(B, N, -1, args.output_dim).permute(0, 2, 1, 3).contiguous()
 
@@ -198,13 +201,17 @@ def Train(args, mylogger, model, prompt_prefix, scaler):
 def getllm(args):
     if args.model == 'gpt2':
         basemodel = GPT2(args.lora, args.ln_grad, args.llm_layers)
-
+    elif args.model == 'llama7b':
+        basemodel = LLaMA7B(args.lora, args.ln_grad, args.llm_layers)
+    else:
+        raise ValueError(f"Model '{args.model}' is not supported. Please use --model 'gpt2' or 'llama7b'.")
+        
     return basemodel
 
 if __name__ == '__main__':
     
     args = InitArgs()
-    wandb.init(project="AIC-LLM", name=f"{args.desc}_{datetime.now().strftime('%Y-%m-%d %H:%M')}", config=vars(args))
+    wandb.init(project=f"AIC-LLM_{args.dataset}", name=f"{args.desc}_{datetime.now().strftime('%Y-%m-%d_%H-%M')}", config=vars(args))
 
     output_len = args.predict_len
     window_size = args.sample_len + args.predict_len
@@ -233,9 +240,21 @@ if __name__ == '__main__':
     #distance_mx = cal_shortest_path_length(adj_mx, distance_mx)
 
     prompt_prefix = None
-    if not args.prompt_prefix is None:
+    if args.dataset[:6] in PROMPTS:
+        print(f"Generating prompt for {args.dataset}...")
+        
+        # Calculate statistics on TRAINING SET
+        train_stats_str = get_statistics(train_loader.dataset.history)
+        
+        # Format the prompt
+        prompt_prefix = PROMPTS[args.dataset[:6]].format(statistics=train_stats_str)
+        print("Generated Prompt:\n", prompt_prefix)
+    
+    # Allow override from args if specific prompt is given (optional, but good practice)
+    if args.prompt_prefix is not None:
         prompt_prefix = args.prompt_prefix
 
+    if prompt_prefix is not None:
         tokenizer = basemodel.gettokenizer()
 
         prompt_prefix = tokenizer(prompt_prefix, 
@@ -263,7 +282,7 @@ if __name__ == '__main__':
                     use_anchor_diff_token = args.use_anchor_diff_token, use_diff = args.use_diff, \
                     use_sep_token = args.use_sep_token, use_sep2_token = args.use_sep2_token, \
                     use_task_token = args.use_task_token, use_context_token = args.use_context_token, use_quality_token = args.use_quality_token, \
-                    task_type = args.task, \
+                    task_type = args.task, user_instruction = args.user_instruction, \
                     use_sandglassAttn = args.sandglassAttn, dropout = args.dropout, trunc_k = args.trunc_k, t_dim = args.t_dim,wo_conloss=args.wo_conloss).cuda()
     
     if not args.from_pretrained_model is None:

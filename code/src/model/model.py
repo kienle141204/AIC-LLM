@@ -3,9 +3,10 @@ from torch import nn
 import numpy as np
 from utils.utils import lap_eig, topological_sort
 from typing import Optional
-from model.sandglassAttn import SpatialEncoder, SpatialDecoder, LinearEncoder, LinearDecoder, SAG
+from model.sandglassAttn import SAG, PerceiverSAG, SetTransformerSAG, PoolingSAG
 from model.embedding import TimeEmbedding, NodeEmbedding
 from model.tokenizer import AnchorDiffTokenizer, Time2Token, Node2Token
+from prompts import  ANCHOR_DATA_INSTRUCTION, CURRENT_DATA_INSTRUCTION
 
 class DecodingLayer(nn.Module):
     def __init__(self, input_dim, emb_dim, output_dim):
@@ -30,7 +31,7 @@ class AICLLM(nn.Module):
                  dropout: float, adj_mx = None, dis_mx = None,
                  use_node_embedding: bool = True,
                  use_time_token: bool = True,
-                 use_sandglassAttn: bool = True,
+                 use_sandglassAttn: int = 0,
                  use_anchor_diff_token: int = 0,
                  use_diff: int = 0,
                  use_sep_token: bool = True,
@@ -39,6 +40,7 @@ class AICLLM(nn.Module):
                  use_context_token: bool = True,
                  use_quality_token: bool = True,
                  task_type: str = 'prediction',
+                 user_instruction: bool = True,
                  t_dim: int = 64, trunc_k=16, wo_conloss=False) :
         super(AICLLM, self).__init__()
 
@@ -61,6 +63,7 @@ class AICLLM(nn.Module):
         self.use_context_token = use_context_token
         self.use_quality_token = use_quality_token
         self.task_type = task_type
+        self.user_instruction = user_instruction
 
         self.topological_sort_node = True
 
@@ -146,8 +149,9 @@ class AICLLM(nn.Module):
 
         self.node_embedding = NodeEmbedding(adj_mx=adj_mx, node_emb_dim=node_emb_dim, k=trunc_k, dropout=dropout)
         self.time_embedding = TimeEmbedding(t_dim=t_dim)
-
-        if self.use_sandglassAttn:
+        
+        # Sandglass Attn
+        if self.use_sandglassAttn == 4:
             self.sag = SAG(sag_dim=sag_dim, 
                            sag_tokens=sag_tokens, 
                            emb_dim=self.emb_dim, 
@@ -155,7 +159,45 @@ class AICLLM(nn.Module):
                            features=input_dim ,
                            dropout=dropout
                            )
-
+            self.sag_anchor = SAG(sag_dim=sag_dim, 
+                                  sag_tokens=sag_tokens, 
+                                  emb_dim=self.emb_dim, 
+                                  sample_len=sample_len, 
+                                  features=input_dim ,
+                                  dropout=dropout
+                                  )
+        # elif self.use_sandglassAttn == 1:
+        #     self.sag = PerceiverSAG(sag_dim=sag_dim, 
+        #                             sag_tokens=sag_tokens, 
+        #                             emb_dim=self.emb_dim, 
+        #                             sample_len=sample_len, 
+        #                             features=input_dim ,
+        #                             dropout=dropout
+        #                             )
+        elif self.use_sandglassAttn == 2:
+            self.sag = SetTransformerSAG(sag_dim=sag_dim, 
+                                        sag_tokens=sag_tokens, 
+                                        emb_dim=self.emb_dim, 
+                                        sample_len=sample_len, 
+                                        features=input_dim ,
+                                        dropout=dropout
+                                        )
+            self.sag_anchor = SetTransformerSAG(sag_dim=sag_dim, 
+                                  sag_tokens=sag_tokens, 
+                                  emb_dim=self.emb_dim, 
+                                  sample_len=sample_len, 
+                                  features=input_dim ,
+                                  dropout=dropout
+                                  )
+        # elif self.use_sandglassAttn == 3:
+        #     self.sag = PoolingSAG(sag_dim=sag_dim, 
+        #                           sag_tokens=sag_tokens, 
+        #                           emb_dim=self.emb_dim, 
+        #                           sample_len=sample_len,    
+        #                           features=input_dim ,
+        #                           dropout=dropout
+        #                           )
+            
 
         self.wo_conloss = wo_conloss
         
@@ -166,54 +208,27 @@ class AICLLM(nn.Module):
         )
 
         self.layer_norm = nn.LayerNorm(self.emb_dim)
+        
+        if self.user_instruction:
+            # Pre-tokenize instructions once to avoid repeated tokenization during training
+            self.register_buffer('anchor_instruction_ids', None)
+            self.register_buffer('current_instruction_ids', None)
     
-    def forward(self, x: torch.FloatTensor, xa: torch.FloatTensor, timestamp: torch.Tensor, prompt_prefix: Optional[torch.Tensor]):
+    def forward(self, x: torch.FloatTensor, xa: torch.FloatTensor, ya: torch.FloatTensor, timestamp: torch.Tensor, prompt_prefix: Optional[torch.Tensor]):
         B, N, TF = x.shape
         other_loss = []
         
-        x_spatial = x
-        if self.use_diff == 1:
-            x_diff = x - xa
-        else:
-            x_diff = xa
 
         timestamp = timestamp[:, :self.sample_len, :]
         te = self.time_embedding(timestamp) 
         ne = self.node_embedding()
 
-        special_tokens_list = []
-        
-        # task token
-        if self.use_task_token:
-            task_token = self.task_token_forecast.repeat(B, 1, 1)
-            special_tokens_list.append(task_token)
-        
-        # quality token (based on diff with anchor)
-        if self.use_quality_token:
-            diff = (x - xa).abs().mean(dim=(1, 2), keepdim=True)  # (B, 1, 1)
-            diff = diff.squeeze(-1)  # (B, 1)
-            
-            quality_score = self.quality_scorer(diff)  # (B, 1)
-            
-            quality_token = (quality_score.unsqueeze(-1) * self.quality_token_high + 
-                           (1 - quality_score.unsqueeze(-1)) * self.quality_token_low)
-            quality_token = quality_token.repeat(1, 1, 1)  # (B, 1, emb_dim)
-            special_tokens_list.append(quality_token)
-        
-        # context token
-        if self.use_context_token:
-            x_context = x.mean(dim=1)  # (B, TF)
-            context_embedding = self.context_aggregator(x_context)  # (B, emb_dim)
-            context_token = self.context_token.repeat(B, 1, 1) + context_embedding.unsqueeze(1)
-            special_tokens_list.append(context_token)
-
         # spatial tokenizer 
-        spatial_tokens = self.node_tokenizer(x_spatial, te, ne)  # (B, N, emb_dim)
+        spatial_tokens = self.node_tokenizer(x, te, ne)  # (B, N, emb_dim)
         if self.topological_sort_node:
             spatial_tokens = spatial_tokens[:, self.node_order, :]
         
         st_embedding = spatial_tokens
-        s_num = N
         s_num = self.sag_tokens
         
         # Precoder
@@ -238,28 +253,62 @@ class AICLLM(nn.Module):
         time_tokens_idx = st_embedding.shape[1]
         st_embedding = torch.concat((time_tokens, st_embedding), dim=1)
 
-        if self.use_sep2_token:
-            sep2_token = self.sep2_token.repeat(B, 1, 1)
-            st_embedding = torch.concat((sep2_token, st_embedding), dim=1)  
+        # use instruction
+        if self.user_instruction:
+            # current instruction - tokenize once and cache
+            if self.current_instruction_ids is None:
+                tokenizer = self.basemodel.gettokenizer()
+                current_instruction_tokens = tokenizer(CURRENT_DATA_INSTRUCTION, 
+                                return_tensors="pt", return_attention_mask=False)
+                self.current_instruction_ids = current_instruction_tokens['input_ids'].cuda()
+            
+            # Get embedding for current instruction
+            current_instruction_emb = self.basemodel.getembedding(self.current_instruction_ids).squeeze(0)  # (seq_len, emb_dim)
+            current_instruction_emb = current_instruction_emb.unsqueeze(0).expand(B, -1, -1)  # (B, seq_len, emb_dim)
+            st_embedding = torch.concat((current_instruction_emb, st_embedding), dim=1)
 
-        if self.use_anchor_diff_token == 1:
-            ad_tokens = self.anchor_diff_tokenizer(x, xa, te)
-            st_embedding = torch.concat((ad_tokens, st_embedding), dim=1)
-        elif self.use_anchor_diff_token == 2:
-            anchor_tokens = self.anchor_tokenizer(x_diff, te)
-            st_embedding = torch.concat((anchor_tokens, st_embedding), dim=1)
+        #### ANCHOR ##########
+        spatial_anchor = self.node_tokenizer(xa, te, ne)
+        if self.topological_sort_node:
+            spatial_anchor = spatial_anchor[:, self.node_order, :]
         
-        # Final sequence: [TASK] | [QUALITY] | [CONTEXT] | [SEP] | [ANCHOR] | [TIME] | [SPATIAL]
-        sep = None
-        if self.use_sep_token:
-            sep = self.sep_token.repeat(B, 1, 1)
-            st_embedding = torch.concat((sep, st_embedding), dim=1)
+        if self.use_sandglassAttn:
+            spatial_anchor, antt_weights_1 = self.sag.encode(spatial_anchor)
+        else:
+            spatial_anchor, antt_weights_1 = self.precoder(spatial_anchor)
         
-        if len(special_tokens_list) > 0:
-            special_tokens = torch.concat(special_tokens_list, dim=1)  # (B, num_special, emb_dim)
-            st_embedding = torch.concat([special_tokens, st_embedding], dim=1)
+        st_embedding = torch.concat((spatial_anchor, st_embedding), dim=1)
         
-        if prompt_prefix is not None:
+        if self.use_sandglassAttn and not self.wo_conloss:
+            if antt_weights_1 is not None:
+                scale = antt_weights_1.sum(dim=1)    #(B,N)
+
+                sag_score = torch.einsum('bmn,bhn->bhm',self.adj_mx[None,:,:],antt_weights_1)
+                other_loss.append(-((sag_score*antt_weights_1-antt_weights_1*antt_weights_1)).sum(dim=2).mean()*10)
+
+                Dirichlet = torch.distributions.dirichlet.Dirichlet(self.alpha)
+                other_loss.append(-Dirichlet.log_prob(torch.softmax(scale,dim=-1)).sum())
+        
+        time_anchor = self.time_tokenizer(xa, te)
+        time_anchor_idx = st_embedding.shape[1]
+        st_embedding = torch.concat((time_anchor, st_embedding), dim=1)
+
+        if self.user_instruction:
+            # anchor instruction - tokenize once and cache
+            if self.anchor_instruction_ids is None:
+                tokenizer = self.basemodel.gettokenizer()
+                anchor_instruction_tokens = tokenizer(ANCHOR_DATA_INSTRUCTION, 
+                                return_tensors="pt", return_attention_mask=False)
+                self.anchor_instruction_ids = anchor_instruction_tokens['input_ids'].cuda()
+            
+            # Get embedding for anchor instruction
+            anchor_instruction_emb = self.basemodel.getembedding(self.anchor_instruction_ids).squeeze(0)  # (seq_len, emb_dim)
+            anchor_instruction_emb = anchor_instruction_emb.unsqueeze(0).expand(B, -1, -1)  # (B, seq_len, emb_dim)
+            st_embedding = torch.concat((anchor_instruction_emb, st_embedding), dim=1)
+
+        ############################
+        
+        if prompt_prefix is not None and self.user_instruction:
             prompt_len,_ = prompt_prefix.shape
             prompt_embedding = self.basemodel.getembedding(prompt_prefix).view(1,prompt_len,-1)
             prompt_embedding = prompt_embedding.repeat(B,1,1)
