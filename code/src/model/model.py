@@ -40,6 +40,7 @@ class AICLLM(nn.Module):
                  use_context_token: bool = True,
                  use_quality_token: bool = True,
                  task_type: str = 'prediction',
+                 user_instruction: bool = True,
                  t_dim: int = 64, trunc_k=16, wo_conloss=False) :
         super(AICLLM, self).__init__()
 
@@ -62,6 +63,7 @@ class AICLLM(nn.Module):
         self.use_context_token = use_context_token
         self.use_quality_token = use_quality_token
         self.task_type = task_type
+        self.user_instruction = user_instruction
 
         self.topological_sort_node = True
 
@@ -207,9 +209,10 @@ class AICLLM(nn.Module):
 
         self.layer_norm = nn.LayerNorm(self.emb_dim)
         
-        # Pre-tokenize instructions once to avoid repeated tokenization during training
-        self.register_buffer('anchor_instruction_ids', None)
-        self.register_buffer('current_instruction_ids', None)
+        if self.user_instruction:
+            # Pre-tokenize instructions once to avoid repeated tokenization during training
+            self.register_buffer('anchor_instruction_ids', None)
+            self.register_buffer('current_instruction_ids', None)
     
     def forward(self, x: torch.FloatTensor, xa: torch.FloatTensor, ya: torch.FloatTensor, timestamp: torch.Tensor, prompt_prefix: Optional[torch.Tensor]):
         B, N, TF = x.shape
@@ -250,17 +253,19 @@ class AICLLM(nn.Module):
         time_tokens_idx = st_embedding.shape[1]
         st_embedding = torch.concat((time_tokens, st_embedding), dim=1)
 
-        # current instruction - tokenize once and cache
-        if self.current_instruction_ids is None:
-            tokenizer = self.basemodel.gettokenizer()
-            current_instruction_tokens = tokenizer(CURRENT_DATA_INSTRUCTION, 
-                            return_tensors="pt", return_attention_mask=False)
-            self.current_instruction_ids = current_instruction_tokens['input_ids'].cuda()
-        
-        # Get embedding for current instruction
-        current_instruction_emb = self.basemodel.getembedding(self.current_instruction_ids).squeeze(0)  # (seq_len, emb_dim)
-        current_instruction_emb = current_instruction_emb.unsqueeze(0).expand(B, -1, -1)  # (B, seq_len, emb_dim)
-        st_embedding = torch.concat((current_instruction_emb, st_embedding), dim=1)
+        # use instruction
+        if self.user_instruction:
+            # current instruction - tokenize once and cache
+            if self.current_instruction_ids is None:
+                tokenizer = self.basemodel.gettokenizer()
+                current_instruction_tokens = tokenizer(CURRENT_DATA_INSTRUCTION, 
+                                return_tensors="pt", return_attention_mask=False)
+                self.current_instruction_ids = current_instruction_tokens['input_ids'].cuda()
+            
+            # Get embedding for current instruction
+            current_instruction_emb = self.basemodel.getembedding(self.current_instruction_ids).squeeze(0)  # (seq_len, emb_dim)
+            current_instruction_emb = current_instruction_emb.unsqueeze(0).expand(B, -1, -1)  # (B, seq_len, emb_dim)
+            st_embedding = torch.concat((current_instruction_emb, st_embedding), dim=1)
 
         #### ANCHOR ##########
         spatial_anchor = self.node_tokenizer(xa, te, ne)
@@ -288,22 +293,22 @@ class AICLLM(nn.Module):
         time_anchor_idx = st_embedding.shape[1]
         st_embedding = torch.concat((time_anchor, st_embedding), dim=1)
 
-        # anchor instruction - tokenize once and cache
-        if self.anchor_instruction_ids is None:
-            tokenizer = self.basemodel.gettokenizer()
-            anchor_instruction_tokens = tokenizer(ANCHOR_DATA_INSTRUCTION, 
-                            return_tensors="pt", return_attention_mask=False)
-            self.anchor_instruction_ids = anchor_instruction_tokens['input_ids'].cuda()
-        
-        # Get embedding for anchor instruction
-        anchor_instruction_emb = self.basemodel.getembedding(self.anchor_instruction_ids).squeeze(0)  # (seq_len, emb_dim)
-        anchor_instruction_emb = anchor_instruction_emb.unsqueeze(0).expand(B, -1, -1)  # (B, seq_len, emb_dim)
-        st_embedding = torch.concat((anchor_instruction_emb, st_embedding), dim=1)
+        if self.user_instruction:
+            # anchor instruction - tokenize once and cache
+            if self.anchor_instruction_ids is None:
+                tokenizer = self.basemodel.gettokenizer()
+                anchor_instruction_tokens = tokenizer(ANCHOR_DATA_INSTRUCTION, 
+                                return_tensors="pt", return_attention_mask=False)
+                self.anchor_instruction_ids = anchor_instruction_tokens['input_ids'].cuda()
+            
+            # Get embedding for anchor instruction
+            anchor_instruction_emb = self.basemodel.getembedding(self.anchor_instruction_ids).squeeze(0)  # (seq_len, emb_dim)
+            anchor_instruction_emb = anchor_instruction_emb.unsqueeze(0).expand(B, -1, -1)  # (B, seq_len, emb_dim)
+            st_embedding = torch.concat((anchor_instruction_emb, st_embedding), dim=1)
 
-        # st_embedding = torch.concat((time_anchor, st_embedding), dim=1)
         ############################
         
-        if prompt_prefix is not None:
+        if prompt_prefix is not None and self.user_instruction:
             prompt_len,_ = prompt_prefix.shape
             prompt_embedding = self.basemodel.getembedding(prompt_prefix).view(1,prompt_len,-1)
             prompt_embedding = prompt_embedding.repeat(B,1,1)
