@@ -32,7 +32,7 @@ class AICLLM(nn.Module):
                  use_node_embedding: bool = True,
                  use_time_token: bool = True,
                  use_sandglassAttn: int = 0,
-
+                 prompt_template: str = None,
                  task_type: str = 'prediction',
                  user_instruction: bool = True,
                  t_dim: int = 64, trunc_k=16, wo_conloss=False) :
@@ -51,6 +51,8 @@ class AICLLM(nn.Module):
         self.dis_mx = dis_mx
         self.task_type = task_type
         self.user_instruction = user_instruction
+        self.prompt_template = prompt_template
+        self.tokenizer = basemodel.gettokenizer() if prompt_template else None
 
         self.topological_sort_node = True
 
@@ -150,9 +152,6 @@ class AICLLM(nn.Module):
     def forward(self, x: torch.FloatTensor, xa: torch.FloatTensor, ya: torch.FloatTensor, timestamp: torch.Tensor, prompt_prefix: Optional[torch.Tensor]):
         B, N, TF = x.shape
         other_loss = []
-
-        statistics = get_statistics(x)
-        prompt_prefix = prompt_prefix.format(statistics=statistics)
         
         timestamp = timestamp[:, :self.sample_len, :]
         te = self.time_embedding(timestamp) 
@@ -231,15 +230,31 @@ class AICLLM(nn.Module):
 
         # ========== COMBINE ALL ==========
         st_embedding = torch.concat((anchor_data, current_data), dim=1)
-        
-        if prompt_prefix is not None and self.user_instruction:
-            prompt_len,_ = prompt_prefix.shape
-            prompt_embedding = self.basemodel.getembedding(prompt_prefix).view(1,prompt_len,-1)
-            prompt_embedding = prompt_embedding.repeat(B,1,1)
-            st_embedding = torch.concat([prompt_embedding, st_embedding],dim=1)
+
+        if self.prompt_template is not None and self.user_instruction:
+            statistics = get_statistics(x)
+            
+            prompt_text = self.prompt_template.format(statistics=statistics)
+
+            prompt_tokens = self.tokenizer(prompt_text, 
+                                          return_tensors="pt", 
+                                          return_attention_mask=False)
+            prompt_prefix = prompt_tokens['input_ids'].cuda().view(-1, 1)
+
+            prompt_len, _ = prompt_prefix.shape
+            prompt_embedding = self.basemodel.getembedding(prompt_prefix).view(1, prompt_len, -1)
+            prompt_embedding = prompt_embedding.repeat(B, 1, 1)
+            st_embedding = torch.concat([prompt_embedding, st_embedding], dim=1)
+            prompt_offset = prompt_len
+        elif prompt_prefix is not None and self.user_instruction:
+            prompt_len, _ = prompt_prefix.shape
+            prompt_embedding = self.basemodel.getembedding(prompt_prefix).view(1, prompt_len, -1)
+            prompt_embedding = prompt_embedding.repeat(B, 1, 1)
+            st_embedding = torch.concat([prompt_embedding, st_embedding], dim=1)
             prompt_offset = prompt_len
         else:
             prompt_offset = 0
+
         
         # ========== LLM PROCESSING ==========
         hidden_state = self.basemodel(st_embedding)

@@ -239,22 +239,15 @@ if __name__ == '__main__':
                                            few_shot = args.few_shot, node_shuffle_seed = args.node_shuffle_seed)
     #distance_mx = cal_shortest_path_length(adj_mx, distance_mx)
 
-    prompt_prefix = None
+    # Get prompt template (not tokenized yet)
+    prompt_template = None
     if args.dataset[:6] in PROMPTS:
-        print(f"Generating prompt for {args.dataset}...")
-        
-        prompt_prefix = PROMPTS[args.dataset[:6]]
-        print("Generated Prompt:\n", prompt_prefix)
+        print(f"Loading prompt template for {args.dataset}...")
+        prompt_template = PROMPTS[args.dataset[:6]]
+        print("Prompt template loaded (will be formatted dynamically per batch)")
     
     if args.prompt_prefix is not None:
-        prompt_prefix = args.prompt_prefix
-
-    if prompt_prefix is not None:
-        tokenizer = basemodel.gettokenizer()
-
-        prompt_prefix = tokenizer(prompt_prefix, 
-                        return_tensors="pt", return_attention_mask=False)
-        prompt_prefix = prompt_prefix['input_ids'].cuda().view(-1,1)#[:-1,:]
+        prompt_template = args.prompt_prefix
 
 
     LOG_DIR = os.path.join(args.log_root,f'{get_time_str()}_{args.desc}_{random_str()}')
@@ -274,6 +267,7 @@ if __name__ == '__main__':
                     sag_dim = args.sag_dim, sag_tokens = args.sag_tokens, \
                      adj_mx = adj_mx, dis_mx = distance_mx, \
                     use_node_embedding = args.node_embedding ,use_time_token= args.time_token, \
+                    prompt_template = prompt_template, \
                     task_type = args.task, user_instruction = args.user_instruction, \
                     use_sandglassAttn = args.sandglassAttn, dropout = args.dropout, trunc_k = args.trunc_k, t_dim = args.t_dim,wo_conloss=args.wo_conloss).cuda()
 
@@ -294,7 +288,7 @@ if __name__ == '__main__':
     mylogger.info(model.grad_state_dict().keys())
     #mylogger.info(model.state_dict().keys())
 
-    Train(args,mylogger,model,prompt_prefix,scaler)
+    Train(args, mylogger, model, None, scaler)  # Model manages prompt internally now
 
     model.save(modelpath)
     
