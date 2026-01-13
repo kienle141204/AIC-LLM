@@ -30,10 +30,10 @@ python main.py \
     --sandglassAttn \
     --sag_dim 128 \
     --sag_tokens 128 \
-    --input_dim 1\
-    --output_dim 1 \
-    --use_anchor_diff_token 2 \
-    --use_diff 0
+    --input_dim 1 \
+    --output_dim 1
+
+
 
 # python main.py \
 #     --data_path '../../data/traffic/PEMS03/PEMS03.npz' \

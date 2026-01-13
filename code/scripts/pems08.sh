@@ -67,6 +67,4 @@ python main.py \
     --sag_tokens 46 \
     --input_dim 1\ \
     --output_dim 1 \
-    --use_anchor_diff_token 2 \
-    --use_diff 0 \
     --user_instruction

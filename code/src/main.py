@@ -243,14 +243,9 @@ if __name__ == '__main__':
     if args.dataset[:6] in PROMPTS:
         print(f"Generating prompt for {args.dataset}...")
         
-        # Calculate statistics on TRAINING SET
-        train_stats_str = get_statistics(train_loader.dataset.history)
-        
-        # Format the prompt
-        prompt_prefix = PROMPTS[args.dataset[:6]].format(statistics=train_stats_str)
+        prompt_prefix = PROMPTS[args.dataset[:6]]
         print("Generated Prompt:\n", prompt_prefix)
     
-    # Allow override from args if specific prompt is given (optional, but good practice)
     if args.prompt_prefix is not None:
         prompt_prefix = args.prompt_prefix
 
@@ -279,11 +274,9 @@ if __name__ == '__main__':
                     sag_dim = args.sag_dim, sag_tokens = args.sag_tokens, \
                      adj_mx = adj_mx, dis_mx = distance_mx, \
                     use_node_embedding = args.node_embedding ,use_time_token= args.time_token, \
-                    use_anchor_diff_token = args.use_anchor_diff_token, use_diff = args.use_diff, \
-                    use_sep_token = args.use_sep_token, use_sep2_token = args.use_sep2_token, \
-                    use_task_token = args.use_task_token, use_context_token = args.use_context_token, use_quality_token = args.use_quality_token, \
                     task_type = args.task, user_instruction = args.user_instruction, \
                     use_sandglassAttn = args.sandglassAttn, dropout = args.dropout, trunc_k = args.trunc_k, t_dim = args.t_dim,wo_conloss=args.wo_conloss).cuda()
+
     
     if not args.from_pretrained_model is None:
         model.load(args.from_pretrained_model)

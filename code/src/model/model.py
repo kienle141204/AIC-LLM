@@ -5,8 +5,8 @@ from utils.utils import lap_eig, topological_sort
 from typing import Optional
 from model.sandglassAttn import SAG, PerceiverSAG, SetTransformerSAG, PoolingSAG
 from model.embedding import TimeEmbedding, NodeEmbedding
-from model.tokenizer import AnchorDiffTokenizer, Time2Token, Node2Token
-from prompts import  ANCHOR_DATA_INSTRUCTION, CURRENT_DATA_INSTRUCTION
+from model.tokenizer import Time2Token, Node2Token
+from prompts import  ANCHOR_DATA_INSTRUCTION, CURRENT_DATA_INSTRUCTION, get_statistics
 
 class DecodingLayer(nn.Module):
     def __init__(self, input_dim, emb_dim, output_dim):
@@ -32,13 +32,7 @@ class AICLLM(nn.Module):
                  use_node_embedding: bool = True,
                  use_time_token: bool = True,
                  use_sandglassAttn: int = 0,
-                 use_anchor_diff_token: int = 0,
-                 use_diff: int = 0,
-                 use_sep_token: bool = True,
-                 use_sep2_token: bool = True,
-                 use_task_token: bool = True,
-                 use_context_token: bool = True,
-                 use_quality_token: bool = True,
+
                  task_type: str = 'prediction',
                  user_instruction: bool = True,
                  t_dim: int = 64, trunc_k=16, wo_conloss=False) :
@@ -53,15 +47,8 @@ class AICLLM(nn.Module):
         self.use_time_token = use_time_token
         self.sag_tokens = sag_tokens
         self.use_sandglassAttn = use_sandglassAttn
-        self.use_anchor_diff_token = use_anchor_diff_token
         self.adj_mx = adj_mx
         self.dis_mx = dis_mx
-        self.use_diff = use_diff 
-        self.use_sep_token = use_sep_token
-        self.use_sep2_token = use_sep2_token
-        self.use_task_token = use_task_token
-        self.use_context_token = use_context_token
-        self.use_quality_token = use_quality_token
         self.task_type = task_type
         self.user_instruction = user_instruction
 
@@ -71,46 +58,7 @@ class AICLLM(nn.Module):
         tim_dim = t_dim*2     #day, week
         self.setadj(adj_mx,dis_mx)
         
-        # separator token
-        if self.use_sep_token:
-            self.sep_token = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
-            nn.init.normal_(self.sep_token, std=0.02)
-        
-        # separator2 token
-        if self.use_sep2_token:
-            self.sep2_token = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
-            nn.init.normal_(self.sep2_token, std=0.02)
-        
-        # task token
-        if self.use_task_token:
-            self.task_token_forecast = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
-            nn.init.normal_(self.task_token_forecast, std=0.02)
-        
-        # context token
-        if self.use_context_token:
-            self.context_token = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
-            nn.init.normal_(self.context_token, std=0.02)
-            # Context aggregation network
-            self.context_aggregator = nn.Sequential(
-                nn.Linear(sample_len * input_dim, self.emb_dim),
-                nn.GELU(),
-                nn.Linear(self.emb_dim, self.emb_dim),
-                nn.LayerNorm(self.emb_dim)
-            )
-        
-        # quality token (based on diff with anchor)
-        if self.use_quality_token:
-            self.quality_token_high = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
-            nn.init.normal_(self.quality_token_high, std=0.02)
-            self.quality_token_low = nn.Parameter(torch.zeros(1, 1, self.emb_dim))
-            nn.init.normal_(self.quality_token_low, std=0.02)
-            # Input: diff features (mean_diff per sample)
-            self.quality_scorer = nn.Sequential(
-                nn.Linear(1, 16),
-                nn.ReLU(),
-                nn.Linear(16, 1),
-                nn.Sigmoid()
-            )
+
         
         self.time_tokenizer = Time2Token(
             sample_len=sample_len, 
@@ -120,22 +68,7 @@ class AICLLM(nn.Module):
             drop_out=dropout
         )
 
-        if self.use_anchor_diff_token == 1:
-            self.anchor_diff_tokenizer = AnchorDiffTokenizer(
-                sample_len=sample_len, 
-                features=input_dim, 
-                emb_dim=self.emb_dim, 
-                tim_dim=tim_dim, 
-                drop_out=dropout
-            )
-        elif self.use_anchor_diff_token == 2:
-            self.anchor_tokenizer = Time2Token(
-                sample_len=sample_len, 
-                features=input_dim, 
-                emb_dim=self.emb_dim, 
-                tim_dim=tim_dim, 
-                drop_out=dropout
-            )   
+   
         
         self.node_tokenizer = Node2Token(
             sample_len=sample_len, 
@@ -151,7 +84,7 @@ class AICLLM(nn.Module):
         self.time_embedding = TimeEmbedding(t_dim=t_dim)
         
         # Sandglass Attn
-        if self.use_sandglassAttn == 4:
+        if self.use_sandglassAttn == 1:
             self.sag = SAG(sag_dim=sag_dim, 
                            sag_tokens=sag_tokens, 
                            emb_dim=self.emb_dim, 
@@ -217,57 +150,54 @@ class AICLLM(nn.Module):
     def forward(self, x: torch.FloatTensor, xa: torch.FloatTensor, ya: torch.FloatTensor, timestamp: torch.Tensor, prompt_prefix: Optional[torch.Tensor]):
         B, N, TF = x.shape
         other_loss = []
-        
 
+        statistics = get_statistics(x)
+        prompt_prefix = prompt_prefix.format(statistics=statistics)
+        
         timestamp = timestamp[:, :self.sample_len, :]
         te = self.time_embedding(timestamp) 
         ne = self.node_embedding()
 
+        # ========== CURRENT DATA PROCESSING ==========
         # spatial tokenizer 
         spatial_tokens = self.node_tokenizer(x, te, ne)  # (B, N, emb_dim)
         if self.topological_sort_node:
             spatial_tokens = spatial_tokens[:, self.node_order, :]
         
-        st_embedding = spatial_tokens
+        st_embedding_current = spatial_tokens
         s_num = self.sag_tokens
         
-        # Precoder
+        # Precoder (SAG encode)
         if self.use_sandglassAttn:
-            st_embedding, attn_weights = self.sag.encode(st_embedding)
+            st_embedding_current, attn_weights = self.sag.encode(st_embedding_current)
         else:
-            st_embedding, attn_weights = self.precoder(st_embedding)
+            st_embedding_current, attn_weights = self.precoder(st_embedding_current)
 
-        
         if self.use_sandglassAttn and not self.wo_conloss:
             if attn_weights is not None:
                 scale = attn_weights.sum(dim=1)    #(B,N)
-
                 sag_score = torch.einsum('bmn,bhn->bhm',self.adj_mx[None,:,:],attn_weights)
                 other_loss.append(-((sag_score*attn_weights-attn_weights*attn_weights)).sum(dim=2).mean()*10)
-
                 Dirichlet = torch.distributions.dirichlet.Dirichlet(self.alpha)
                 other_loss.append(-Dirichlet.log_prob(torch.softmax(scale,dim=-1)).sum())
         
-        # Time Tokenizer
+        # Time Tokenizer for current data
         time_tokens = self.time_tokenizer(x, te)
-        time_tokens_idx = st_embedding.shape[1]
-        st_embedding = torch.concat((time_tokens, st_embedding), dim=1)
+        current_data = torch.concat((time_tokens, st_embedding_current), dim=1)
 
-        # use instruction
+        # Current instruction
         if self.user_instruction:
-            # current instruction - tokenize once and cache
             if self.current_instruction_ids is None:
                 tokenizer = self.basemodel.gettokenizer()
                 current_instruction_tokens = tokenizer(CURRENT_DATA_INSTRUCTION, 
                                 return_tensors="pt", return_attention_mask=False)
                 self.current_instruction_ids = current_instruction_tokens['input_ids'].cuda()
             
-            # Get embedding for current instruction
-            current_instruction_emb = self.basemodel.getembedding(self.current_instruction_ids).squeeze(0)  # (seq_len, emb_dim)
-            current_instruction_emb = current_instruction_emb.unsqueeze(0).expand(B, -1, -1)  # (B, seq_len, emb_dim)
-            st_embedding = torch.concat((current_instruction_emb, st_embedding), dim=1)
+            current_instruction_emb = self.basemodel.getembedding(self.current_instruction_ids).squeeze(0)
+            current_instruction_emb = current_instruction_emb.unsqueeze(0).expand(B, -1, -1)
+            current_data = torch.concat((current_instruction_emb, current_data), dim=1)
 
-        #### ANCHOR ##########
+        # ========== ANCHOR DATA PROCESSING ==========
         spatial_anchor = self.node_tokenizer(xa, te, ne)
         if self.topological_sort_node:
             spatial_anchor = spatial_anchor[:, self.node_order, :]
@@ -277,47 +207,53 @@ class AICLLM(nn.Module):
         else:
             spatial_anchor, antt_weights_1 = self.precoder(spatial_anchor)
         
-        st_embedding = torch.concat((spatial_anchor, st_embedding), dim=1)
-        
         if self.use_sandglassAttn and not self.wo_conloss:
             if antt_weights_1 is not None:
-                scale = antt_weights_1.sum(dim=1)    #(B,N)
-
+                scale = antt_weights_1.sum(dim=1)
                 sag_score = torch.einsum('bmn,bhn->bhm',self.adj_mx[None,:,:],antt_weights_1)
                 other_loss.append(-((sag_score*antt_weights_1-antt_weights_1*antt_weights_1)).sum(dim=2).mean()*10)
-
                 Dirichlet = torch.distributions.dirichlet.Dirichlet(self.alpha)
                 other_loss.append(-Dirichlet.log_prob(torch.softmax(scale,dim=-1)).sum())
         
         time_anchor = self.time_tokenizer(xa, te)
-        time_anchor_idx = st_embedding.shape[1]
-        st_embedding = torch.concat((time_anchor, st_embedding), dim=1)
+        anchor_data = torch.concat((time_anchor, spatial_anchor), dim=1)
 
         if self.user_instruction:
-            # anchor instruction - tokenize once and cache
             if self.anchor_instruction_ids is None:
                 tokenizer = self.basemodel.gettokenizer()
                 anchor_instruction_tokens = tokenizer(ANCHOR_DATA_INSTRUCTION, 
                                 return_tensors="pt", return_attention_mask=False)
                 self.anchor_instruction_ids = anchor_instruction_tokens['input_ids'].cuda()
             
-            # Get embedding for anchor instruction
-            anchor_instruction_emb = self.basemodel.getembedding(self.anchor_instruction_ids).squeeze(0)  # (seq_len, emb_dim)
-            anchor_instruction_emb = anchor_instruction_emb.unsqueeze(0).expand(B, -1, -1)  # (B, seq_len, emb_dim)
-            st_embedding = torch.concat((anchor_instruction_emb, st_embedding), dim=1)
+            anchor_instruction_emb = self.basemodel.getembedding(self.anchor_instruction_ids).squeeze(0)
+            anchor_instruction_emb = anchor_instruction_emb.unsqueeze(0).expand(B, -1, -1)
+            anchor_data = torch.concat((anchor_instruction_emb, anchor_data), dim=1)
 
-        ############################
+        # ========== COMBINE ALL ==========
+        st_embedding = torch.concat((anchor_data, current_data), dim=1)
         
         if prompt_prefix is not None and self.user_instruction:
             prompt_len,_ = prompt_prefix.shape
             prompt_embedding = self.basemodel.getembedding(prompt_prefix).view(1,prompt_len,-1)
             prompt_embedding = prompt_embedding.repeat(B,1,1)
             st_embedding = torch.concat([prompt_embedding, st_embedding],dim=1)
+            prompt_offset = prompt_len
+        else:
+            prompt_offset = 0
         
-        hidden_state = st_embedding
-
-        hidden_state = self.basemodel(hidden_state)
-        s_state = hidden_state[:, -s_num:, :]  
+        # ========== LLM PROCESSING ==========
+        hidden_state = self.basemodel(st_embedding)
+        
+        anchor_len = anchor_data.shape[1]
+        
+        current_data_start_idx = prompt_offset + anchor_len
+        
+        current_instruction_len = current_instruction_emb.shape[1] if self.user_instruction else 0
+        
+        time_tokens_len = time_tokens.shape[1] # This is typically 1
+        
+        current_spatial_sag_start = current_data_start_idx + current_instruction_len + time_tokens_len
+        s_state = hidden_state[:, current_spatial_sag_start : current_spatial_sag_start + s_num, :]
 
         # Decoder
         if self.use_sandglassAttn:
@@ -330,7 +266,8 @@ class AICLLM(nn.Module):
             s_state = s_state[:,self.node_order_rev,:]
 
         if self.use_time_token:
-            t_state = hidden_state[:,-time_tokens_idx-1:-time_tokens_idx,:]
+            time_token_pos = current_data_start_idx + current_instruction_len
+            t_state = hidden_state[:, time_token_pos : time_token_pos + time_tokens_len, :]
             t_state += time_tokens[:,-1:,:]
             s_state += t_state
 
