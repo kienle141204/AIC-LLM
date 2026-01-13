@@ -282,9 +282,12 @@ class AICLLM(nn.Module):
 
         if self.use_time_token:
             time_token_pos = current_data_start_idx + current_instruction_len
-            t_state = hidden_state[:, time_token_pos : time_token_pos + time_tokens_len, :]
-            t_state += time_tokens[:,-1:,:]
-            s_state += t_state
+            t_state_hidden = hidden_state[:, time_token_pos : time_token_pos + time_tokens_len, :]
+            
+            t_state = t_state_hidden[:, -1:, :]  
+            t_state = t_state + time_tokens[:, -1:, :]
+            
+            s_state = s_state + t_state
 
         s_state = self.layer_norm(s_state)
 
