@@ -7,7 +7,7 @@ import os
 from utils.utils import get_time_str,check_dir,draw_loss_line,draw_mape_node,get_randmask,get_block_mask, cal_shortest_path_length
 from logger import getlogger
 from model.model import AICLLM
-from model.llm import GPT2, LLaMA7B
+from model.llm import GPT2, LLaMA7B, Qwen3
 from data.data import load_data
 from utils.metrics import MAE_torch,RMSE_torch,MAPE_torch,MAPE_torch_node,cal_metrics
 from utils.argsinit import InitArgs
