@@ -197,12 +197,13 @@ def Train(args, mylogger, model, prompt_prefix, scaler):
 
     draw_loss_line(train_loss_line, val_loss_line, os.path.join(LOG_DIR, 'loss.png'))
 
-
 def getllm(args):
     if args.model == 'gpt2':
         basemodel = GPT2(args.lora, args.ln_grad, args.llm_layers)
     elif args.model == 'llama7b':
         basemodel = LLaMA7B(args.lora, args.ln_grad, args.llm_layers)
+    elif args.model == 'qwen3':
+        basemodel = Qwen3(args.lora, args.ln_grad, args.llm_layers)
     else:
         raise ValueError(f"Model '{args.model}' is not supported. Please use --model 'gpt2' or 'llama7b'.")
         

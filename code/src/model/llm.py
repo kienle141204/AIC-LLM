@@ -3,6 +3,7 @@ from torch import nn
 from modelscope.models import Model
 from swift import LoRAConfig, Swift
 from modelscope import AutoTokenizer 
+from transformers import AutoConfig, AutoModel, AutoTokenizer
 
 class BaseModel(nn.Module):
     def __init__(self):
@@ -23,6 +24,111 @@ class BaseModel(nn.Module):
     def get_week_embedding(self):
         raise NotImplementedError("Subclasses should implement this method.")
     
+
+class Qwen3(BaseModel):
+    def __init__(self, lora, ln_grad, layers=None): 
+        super(Qwen3, self).__init__()
+
+        try:
+            print("Loading local Qwen3-0.6B model")
+            local_model_path = '/home/cds/ltkien/llm/Qwen3-0.6B'
+            
+            self.config = AutoConfig.from_pretrained(
+                local_model_path, 
+                trust_remote_code=True, 
+                local_files_only=True
+            )
+            
+            if layers is not None:
+                self.config.num_hidden_layers = layers
+            
+            self.config.output_hidden_states = True
+            
+            self.llm = AutoModel.from_pretrained(
+                local_model_path, 
+                config=self.config,
+                trust_remote_code=True, 
+                local_files_only=True
+            )
+            
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                local_model_path, 
+                trust_remote_code=True, 
+                local_files_only=True
+            )
+                        
+        except Exception as e:
+            self.config = AutoConfig.from_pretrained(
+                'Qwen/Qwen2.5-0.5B', 
+                trust_remote_code=True
+            )
+            
+            if layers is not None:
+                self.config.num_hidden_layers = layers
+            
+            self.config.output_hidden_states = True
+            
+            self.llm = AutoModel.from_pretrained(
+                'Qwen/Qwen2.5-0.5B', 
+                config=self.config,
+                trust_remote_code=True
+            )
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                'Qwen/Qwen2.5-0.5B', 
+                trust_remote_code=True
+            )
+        
+        self.dim = self.config.hidden_size
+        
+        for name, param in self.llm.named_parameters():
+            param.requires_grad_(False)
+        
+        # Apply LoRA
+        if lora:
+            try:
+                from peft import LoraConfig, get_peft_model
+                
+                lora_config = LoraConfig(
+                    r=16,
+                    lora_alpha=32,
+                    target_modules=['q_proj', 'k_proj', 'v_proj', 'o_proj'],  # Qwen attention
+                    lora_dropout=0.1,
+                    bias="none",
+                    task_type="FEATURE_EXTRACTION",
+                )
+                
+                self.llm = get_peft_model(self.llm, lora_config)
+                self.llm.print_trainable_parameters()
+                
+            except ImportError:
+                try:
+                    lora_config = LoRAConfig(
+                        r=16,
+                        lora_alpha=32,
+                        target_modules=['q_proj', 'k_proj', 'v_proj', 'o_proj'],
+                        lora_dropout=0.1,
+                    )
+                    self.llm = Swift.prepare_model(self.llm, lora_config, trust_remote_code=True).model
+                except:
+                    pass
+
+        if ln_grad:
+            for name, param in self.llm.named_parameters():
+                if 'norm' in name.lower():
+                    param.requires_grad_(True)
+    
+    def forward(self, input: torch.FloatTensor, attention_mask=None):
+        output = self.llm(inputs_embeds=input, attention_mask=attention_mask, output_hidden_states=True)
+        return output.hidden_states[-1]
+    
+    def gettokenizer(self):
+        return self.tokenizer
+
+    def getembedding(self, input_ids):
+        return self.llm.get_input_embeddings()(input_ids)
+    
+        
+
 class GPT2(BaseModel):
     def __init__(self, lora, ln_grad, layers=None): 
         super(GPT2, self).__init__()
@@ -73,7 +179,6 @@ class GPT2(BaseModel):
 class LLaMA7B(BaseModel):
     def __init__(self, lora, ln_grad, layers=None): 
         super(LLaMA7B, self).__init__()
-        from transformers import AutoConfig, AutoModel, AutoTokenizer
 
         print("Loading LLaMA-7B model")
         model_name = 'huggyllama/llama-7b'
@@ -121,13 +226,11 @@ class LLaMA7B(BaseModel):
             param.requires_grad_(False)
             
     def forward(self, input: torch.FloatTensor, attention_mask=None):
-        output = self.llm(inputs_embeds=input, attention_mask=attention_mask).hidden_states[-1]
-        return output
+        output = self.llm(inputs_embeds=input, attention_mask=attention_mask, output_hidden_states=True)
+        return output.hidden_states[-1]
     
     def gettokenizer(self):
         return self.tokenizer
 
     def getembedding(self, input_ids):
         return self.llm.get_input_embeddings()(input_ids)
-
-
