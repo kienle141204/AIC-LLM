@@ -24,9 +24,9 @@ cd /home/user03/VARDiff-test/newtest/AIC-LLM/code/src
 
 # bash '../scripts/pems03.sh'
 
-bash '../scripts/pems04.sh'
+# bash '../scripts/pems04.sh'
 
-# bash '../scripts/pems08.sh'
+bash '../scripts/pems08.sh'
 
 # bash '../scripts/pems07.sh'
 
